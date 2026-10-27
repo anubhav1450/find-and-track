@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from cloud import Config,CloudError,Supabase,make_handler,ACCESS,REFRESH,CSRF
+from cloud import Config,CloudError,Supabase,make_handler,ACCESS,REFRESH,CSRF,PKCE
 ORIGIN='https://findtrack.example.com'
 CONFIG=Config('https://project.supabase.co','public-test-key','owner@example.com',ORIGIN)
 DATA={'schema':1,'profile':{'name':'Test Owner','resume':'Python'},'jobs':[],'contacts':[],'companies':[],'events':[],'actions':[],'rules':[]}
@@ -21,7 +21,10 @@ class Store:
     def save(self,access,revision,data):
         if revision!=self.state['revision']:raise CloudError(409,'Reload before editing')
         self.saved+=1;self.state={'revision':revision+1,'data':copy.deepcopy(data)};return revision+1
-    def start(self,email):self.sent.append(email)
+    def start(self,email,challenge):self.sent.append(email);self.challenge=challenge
+    def exchange(self,code,verifier):
+        if code!='valid-code' or verifier!='v'*64:raise CloudError(400,'Invalid code')
+        return {'access_token':'valid-token','refresh_token':'refresh-token','expires_in':3600}
     def verify(self,email,code):
         if code!='123456':raise CloudError(400,'Invalid code')
         return {'access_token':'valid-token','refresh_token':'refresh-token','expires_in':3600}
@@ -92,11 +95,22 @@ class CloudTests(unittest.TestCase):
     def test_logout_clears_all_cookies(self):
         status,_,headers=self.request('/api/auth/logout','POST',authenticated=True,headers={'Origin':ORIGIN,'X-Workspace-Token':'nonce'})
         self.assertEqual(status,200)
-        self.assertEqual(len(headers.get_all('Set-Cookie')),3)
+        self.assertEqual(len(headers.get_all('Set-Cookie')),4)
         self.assertTrue(all('Max-Age=0' in c for c in headers.get_all('Set-Cookie')))
     def test_cloud_workflow_preserves_revision_conflicts(self):
         self.assertEqual(self.request('/api/workflow','POST',{'action':'prepare'},True,{'Origin':ORIGIN,'X-Workspace-Token':'nonce'})[0],200)
         self.assertEqual(self.store.state['revision'],2)
+    def test_magic_link_requires_the_original_browser_proof(self):
+        status,_,_=self.request('/auth/callback?code=valid-code')
+        self.assertEqual(status,401)
+        status,_,headers=self.request('/auth/callback?code=valid-code',headers={'Cookie':f'{PKCE}='+('v'*64)})
+        self.assertEqual(status,303);self.assertEqual(headers['Location'],'/')
+        self.assertEqual(len(headers.get_all('Set-Cookie')),4)
+        self.assertEqual(self.request('/auth/callback?code=valid-code&code=other',headers={'Cookie':f'{PKCE}='+('v'*64)})[0],401)
+    def test_magic_link_start_sets_secure_pkce_proof(self):
+        status,_,headers=self.request('/api/auth/start','POST',{'email':'owner@example.com'},headers={'Origin':ORIGIN})
+        self.assertEqual(status,200);self.assertIn(PKCE,headers['Set-Cookie']);self.assertIn('HttpOnly',headers['Set-Cookie'])
+        self.assertEqual(len(self.store.challenge),43)
     def test_missing_env_fails_closed(self):
         with patch.dict('os.environ',{},clear=True):
             with self.assertRaises(CloudError) as exc:Config.from_env()

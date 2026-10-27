@@ -7,13 +7,13 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
-from urllib.parse import urlsplit
-import hmac,json,mimetypes,os,re,secrets
+from urllib.parse import urlsplit,urlencode,parse_qs
+import base64,hashlib,hmac,json,mimetypes,os,re,secrets
 from uuid import UUID
 from server import validate
 from workflow import prepare,refresh_feed,fetch_hevo,utcnow
 ROOT=Path(__file__).resolve().parent
-ACCESS='__Host-ft_access';REFRESH='__Host-ft_refresh';CSRF='__Host-ft_csrf'
+ACCESS='__Host-ft_access';REFRESH='__Host-ft_refresh';CSRF='__Host-ft_csrf';PKCE='__Host-ft_pkce'
 class CloudError(Exception):
     def __init__(self,status,message):
         self.status,self.message=status,message
@@ -60,7 +60,8 @@ class Supabase:
         except (URLError,TimeoutError,OSError,ValueError):raise CloudError(502,'The cloud service is unavailable. Your saved workspace is preserved.') from None
     def user(self,access):return self.request('/auth/v1/user',access=access)
     def refresh(self,token):return self.request('/auth/v1/token?grant_type=refresh_token','POST',{'refresh_token':token})
-    def start(self,email):return self.request('/auth/v1/otp','POST',{'email':email,'create_user':True})
+    def start(self,email,challenge):return self.request('/auth/v1/otp?'+urlencode({'redirect_to':self.config.origin+'/auth/callback'}),'POST',{'email':email,'create_user':True,'code_challenge':challenge,'code_challenge_method':'s256'})
+    def exchange(self,code,verifier):return self.request('/auth/v1/token?grant_type=pkce','POST',{'auth_code':code,'code_verifier':verifier})
     def verify(self,email,code):return self.request('/auth/v1/verify','POST',{'email':email,'token':code,'type':'email'})
     def logout(self,access):return self.request('/auth/v1/logout','POST',access=access)
     def load(self,access):
@@ -77,16 +78,16 @@ class Supabase:
 def make_handler(config=None,client=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass  # No auth query strings, cookies or bodies in logs.
-        def reply(self,status,value,kind='application/json; charset=utf-8'):
+        def reply(self,status,value,kind='application/json; charset=utf-8',extra=None):
             body=json.dumps(value).encode() if kind.startswith('application/json') else value
             self.send_response(status)
             headers={'Content-Type':kind,'Content-Length':str(len(body)),'Cache-Control':'private, no-store','Vary':'Cookie','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"}
-            for k,v in headers.items():self.send_header(k,v)
+            for k,v in {**headers,**(extra or {})}.items():self.send_header(k,v)
             for cookie in self.out_cookies:self.send_header('Set-Cookie',cookie)
             self.end_headers();self.wfile.write(body)
         def cookie(self,name,value,age):self.out_cookies.append(f'{name}={value}; Path=/; Max-Age={int(age)}; Secure; HttpOnly; SameSite=Lax')
         def clear_cookies(self):
-            for name in (ACCESS,REFRESH,CSRF):self.cookie(name,'',0)
+            for name in (ACCESS,REFRESH,CSRF,PKCE):self.cookie(name,'',0)
         def body(self,limit=5_000_000):
             try:size=int(self.headers.get('Content-Length','0'))
             except ValueError:raise CloudError(400,'Invalid request.')
@@ -146,14 +147,27 @@ def make_handler(config=None,client=None):
                     self.origin()
                     if path=='/api/auth/start':
                         email=str(self.body(2048).get('email','')).strip().lower()
-                        if email==self.cfg.owner_email:self.db.start(email)
-                        return self.reply(200,{'message':'If this is the workspace owner’s email, a sign-in code is on its way.'})
+                        verifier=secrets.token_urlsafe(48)
+                        challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
+                        self.cookie(PKCE,verifier,600)
+                        if email==self.cfg.owner_email:self.db.start(email,challenge)
+                        return self.reply(200,{'message':'If this is the workspace owner’s email, a sign-in link is on its way. Open it in this browser to continue.'})
                     if path=='/api/auth/verify':
                         body=self.body(2048);email=str(body.get('email','')).strip().lower();code=str(body.get('code','')).strip()
                         if email!=self.cfg.owner_email or not re.fullmatch(r'\d{6,10}',code):raise CloudError(400,'Check your email and sign-in code.')
                         session=self.db.verify(email,code);self.owner(self.db.user(session.get('access_token','')))
                         self.tokens(session);self.cookie(CSRF,secrets.token_urlsafe(32),604800)
                         return self.reply(200,{'ok':True})
+                if self.command=='GET' and path=='/auth/callback':
+                    query=parse_qs(urlsplit(self.path).query,max_num_fields=10)
+                    codes=query.get('code',[]);verifier=self.cookies.get(PKCE)
+                    self.cookie(PKCE,'',0)
+                    if len(codes)!=1 or not re.fullmatch(r'[A-Za-z0-9_-]{8,256}',codes[0]) or not verifier or not re.fullmatch(r'[A-Za-z0-9_-]{43,128}',verifier.value):
+                        raise CloudError(401,'Open the sign-in link in the browser where you requested it, or request a new link.')
+                    session=self.db.exchange(codes[0],verifier.value)
+                    self.owner(self.db.user(session.get('access_token','')))
+                    self.tokens(session);self.cookie(CSRF,secrets.token_urlsafe(32),604800)
+                    return self.reply(303,b'','text/plain; charset=utf-8',{'Location':'/'})
                 if self.command=='GET' and path=='/':
                     try:self.authenticated()
                     except CloudError as exc:
