@@ -6,6 +6,8 @@ I built this while applying for early-career software roles. Finding eligible jo
 
 This is a working personal prototype, not a finished job aggregator or an autonomous application service.
 
+See [submission notes](SUBMISSION.md) for the demonstration story and review links.
+
 ## What works today
 
 - A dashboard with job links, eligibility notes, compensation uncertainty and application progress.
