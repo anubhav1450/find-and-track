@@ -1,0 +1,8 @@
+#!/bin/zsh
+APP_ROOT="${0:A:h:h:h:h}"
+for FT_PYTHON in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+  if [[ -x "$FT_PYTHON" ]]; then
+    exec "$FT_PYTHON" "$APP_ROOT/launch.py"
+  fi
+done
+exit 1
