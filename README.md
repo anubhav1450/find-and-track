@@ -2,6 +2,17 @@
 
 A local workspace for finding relevant software jobs, preparing truthful resume drafts, tracking applications and organizing recruiter follow-ups.
 
+## Use with Alan
+
+The [Alan companion](ALAN_COMPANION.md) packages this workflow as a [skill](skills/find-track/SKILL.md) and local command-line bridge. Alan supplies research and reasoning; the bridge previews and saves approved jobs with duplicate and stale-profile checks. A fictional sample workspace is isolated from personal records.
+
+```sh
+python3 tools/findtrack.py demo
+python3 tools/findtrack.py serve
+```
+
+Open http://127.0.0.1:8766, then follow the companion guide in an Alan local session. This does not expose the private hosted workspace or add an MCP server.
+
 ## Start
 
 Python 3 and a modern browser are required. On macOS, open `outputs/find-track-app/Find&Track.app` or `outputs/find-track-app/start.command`. Alternatively:
