@@ -1,0 +1,15 @@
+/work/
+/outputs/*
+!/outputs/find-track-app/
+/Finish repository setup.command
+**/data/
+**/__pycache__/
+*.pyc
+*.sqlite3*
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
