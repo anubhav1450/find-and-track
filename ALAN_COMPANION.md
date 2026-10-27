@@ -2,6 +2,10 @@
 
 A reusable Alan skill plus a small local persistence bridge. Alan reads and reasons about a job; Find&Track previews, deduplicates and saves approved records, preserving their application state.
 
+## Verification status
+
+The skill was installed and enabled in Alan. Local preview, approved save, duplicate handling and dashboard persistence were verified through the CLI. A real Alan invocation was attempted but blocked by unavailable managed-model allowance; successful end-to-end agent execution remains pending.
+
 ## Try it in Alan
 
 1. Open this repository as the project folder in Alan and select **This computer**. This first version uses local execution, not the hosted personal app.
