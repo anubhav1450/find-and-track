@@ -1,0 +1,11 @@
+.git
+work
+**/data
+**/__pycache__
+**/*.pyc
+**/tests
+outputs/*.png
+outputs/*.md
+outputs/find-track-app/Find&Track.app
+Finish repository setup.command
+.env*

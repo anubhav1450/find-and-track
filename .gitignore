@@ -13,3 +13,5 @@
 !.env.example
 *.pem
 *.key
+
+.vercel/
