@@ -31,7 +31,8 @@ def main():
         directory.mkdir(exist_ok=True)
         logfile = directory / 'server.log'
         with logfile.open('ab') as output:
-            process = subprocess.Popen([sys.executable, str(ROOT / 'server.py'), '--port', str(args.port)], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
+            interpreter = ROOT.parents[1] / '.venv' / 'bin' / 'python3'
+            process = subprocess.Popen([str(interpreter) if interpreter.exists() else sys.executable, str(ROOT / 'server.py'), '--port', str(args.port)], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True)
         logfile.chmod(0o600)
         for _ in range(60):
             if ready(url):

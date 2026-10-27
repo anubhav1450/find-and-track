@@ -9,3 +9,5 @@ outputs/*.md
 outputs/find-track-app/Find&Track.app
 Finish repository setup.command
 .env*
+
+.venv
