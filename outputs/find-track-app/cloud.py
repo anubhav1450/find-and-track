@@ -133,7 +133,7 @@ def make_handler(config=None,client=None):
             try:
                 self.cookies.load(self.headers.get('Cookie',''))
                 path=urlsplit(self.path).path
-                assets={'/app.js':'app.js','/domain.js':'domain.js','/styles.css':'styles.css','/login.js':'login.js'}
+                assets={'/app.js':'app.js','/domain.js':'domain.js','/styles.css':'styles.css','/login.js':'login.js','/inter.ttf':'inter.ttf'}
                 if self.command=='GET' and path in assets:return self.asset(assets[path])
                 try:self.cfg=config or Config.from_env()
                 except CloudError:
@@ -186,6 +186,10 @@ def make_handler(config=None,client=None):
                         try:self.db.logout(self.access)
                         finally:self.clear_cookies()
                         return self.reply(200,{'ok':True})
+                    if self.command=='POST' and path=='/api/resume/extract':
+                        from resume_import import extract_resume
+                        try:return self.reply(200,extract_resume(self.body(4_100_000)))
+                        except ValueError as exc:raise CloudError(400,str(exc))
                     if self.command=='PUT' and path=='/api/state':
                         body=self.body();data=validate(body.get('data'));revision=body.get('revision')
                         if type(revision) is not int or revision<1:raise CloudError(400,'Invalid workspace revision.')

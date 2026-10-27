@@ -22,3 +22,11 @@ test('application boot and every screen render with the domain bundle loaded', a
     assert.ok(app.innerHTML.includes('Software Engineer'),tab);
   }
 });
+test('company contacts are shown across roles without claiming vacancy ownership',async()=>{
+ const app={innerHTML:''},modal={};const sample={schema:1,profile:{name:'Test User',resume:'Python'},jobs:[{id:'new-job',company:'Example',title:'Engineer',status:'saved',skills:[],requirements:[]}],contacts:[{id:'p',name:'Test Recruiter',company:'Example',status:'discovered',role:'Recruiter',jobIds:[]}],companies:[],actions:[],events:[],rules:[]};
+ const context=vm.createContext({console,structuredClone,URL,crypto:require('node:crypto').webcrypto,setTimeout,clearTimeout,document:{querySelector:s=>s==='#app'?app:s==='#modal'?modal:{},addEventListener:()=>{}},fetch:async url=>({ok:true,json:async()=>url==='/api/session'?{token:'test'}:{revision:1,data:sample}})});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/domain.js'),'utf8'),context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8'),context);await new Promise(r=>setImmediate(r));
+ vm.runInContext("page='detail';selected='new-job';tab='people';render();",context);
+ assert.ok(app.innerHTML.includes('Test Recruiter'));assert.ok(app.innerHTML.includes('ownership of this vacancy is unconfirmed'));assert.ok(app.innerHTML.includes('Find recruiters'));
+ vm.runInContext("page='profile';render();",context);assert.ok(app.innerHTML.indexOf('Import resume')<app.innerHTML.indexOf('Master resume'));
+});

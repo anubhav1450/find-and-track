@@ -118,7 +118,7 @@ def make_handler(db_path, token):
                 with closing(sqlite3.connect(db_path)) as db, db:
                     revision, payload = db.execute('SELECT revision,payload FROM workspace WHERE id=1').fetchone()
                 return self.reply(200, {'revision': revision, 'data': json.loads(payload)})
-            files = {'/': 'index.html', '/app.js': 'app.js', '/domain.js': 'domain.js', '/styles.css': 'styles.css'}
+            files = {'/': 'index.html', '/app.js': 'app.js', '/domain.js': 'domain.js', '/styles.css': 'styles.css', '/inter.ttf': 'inter.ttf'}
             if path not in files:
                 return self.reply(404, {'error': 'Not found'})
             file = ROOT / 'static' / files[path]
@@ -156,6 +156,13 @@ def make_handler(db_path, token):
                 return self.reply(403, {'error': 'Invalid local session. Reload this page.'})
             if self.headers.get('Origin') not in (None, f'http://127.0.0.1:{self.server.server_port}', f'http://localhost:{self.server.server_port}'):
                 return self.reply(403, {'error': 'Invalid origin.'})
+            if self.path == '/api/resume/extract':
+                try:
+                    size=int(self.headers.get('Content-Length','0'))
+                    if size<1 or size>4_100_000:return self.reply(413,{'error':'Use a resume under 3 MB.'})
+                    from resume_import import extract_resume
+                    return self.reply(200,extract_resume(json.loads(self.rfile.read(size))))
+                except (ValueError,TypeError,AttributeError) as exc:return self.reply(400,{'error':str(exc)})
             if self.path != '/api/workflow':
                 return self.reply(404, {'error': 'Not found'})
             try:
