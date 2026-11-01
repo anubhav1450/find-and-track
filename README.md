@@ -66,7 +66,7 @@ See [ALAN_COMPANION.md](ALAN_COMPANION.md) for setup, exact commands and boundar
 
 | Area | Current state |
 | --- | --- |
-| Job discovery | One on-demand public employer feed; broader discovery is assisted research. No claim to cover every portal. |
+| Job discovery | On-demand Lever feeds for Hevo Data, Zeta and CRED, with resume skill matching and per-source results. Coverage is limited to these employers. |
 | Recruiter discovery | Partial researched links; no automatic LinkedIn scraping, connecting or messaging. |
 | Resume comparison | Keyword-based guidance that needs human review, not a hiring prediction. |
 | Gmail | Imported email batches can be matched; automatic mailbox monitoring is not connected. |

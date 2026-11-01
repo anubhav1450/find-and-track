@@ -242,7 +242,18 @@ def match_inbox(data,messages):
         known.add(mid);outcome['matched']+=1
     return outcome
 
-def screen(title,text,location):
+def screen(title,text,location,profile=None):
+    preferences=(profile or {}).get('candidate',{})
+    geography=preferences.get('geography','India')
+    role_families=preferences.get('roleFamilies',[])
+    if isinstance(geography,str) and geography.strip() and geography.strip().lower()!='india':
+        requested=geography.strip()
+        if requested.lower() not in {'anywhere','worldwide','any'}:
+            if not re.search(r'(?<!\w)'+re.escape(requested)+r'(?!\w)',location,re.I):
+                return 'review','Requested geography is not established by the posting'
+        # Reuse the legacy software/experience checks after geography review.
+        location='India'
+
     title_lower=title.lower();description=text.lower()
     if re.search(r'\b(senior|staff|principal|lead|manager|director|architect)\b|\bsde\s*(?:ii|iii|2|3)\b',title_lower):
         return 'exclude','Senior/leadership role'
@@ -252,6 +263,14 @@ def screen(title,text,location):
         return 'exclude','India eligibility not established'
     if re.search(r'\bunpaid\b|permanent night shift|(?:pay|payment of) (?:an? )?(?:application|training|interview) fee',description):
         return 'exclude','Disclosed hard exclusion'
+    if isinstance(role_families,list):
+        specific=[role.strip().lower() for role in role_families if isinstance(role,str) and role.strip()]
+        broad={'software development','software engineering','software engineer','developer','programmer'}
+        if specific and not broad.intersection(specific):
+            aliases={'backend':r'back.?end','frontend':r'front.?end','full stack':r'full.?stack'}
+            patterns=[aliases.get(role,re.escape(role)) for role in specific]
+            if not any(re.search(pattern,title,re.I) for pattern in patterns):
+                return 'review','Role title does not establish a selected role family'
     # Numeric experience claims need local context; bare 0→1 product language never qualifies.
     ranges=re.findall(r'\b(\d+)\s*(?:[-–]|to)\s*(\d+)\s*years?\s*(?:of\s*)?(?:experience|in software|in development)',description)
     if any(int(lo)>=2 for lo,_ in ranges) or re.search(r'\b[2-9]\d*\s*\+\s*years?\b|(?:minimum|at least)\s+[2-9]\d*\s+years?',description):
@@ -260,20 +279,51 @@ def screen(title,text,location):
         return 'shortlist','Explicit early-career / zero-experience eligibility; other terms need verification'
     return 'review','Experience / graduate eligibility needs review'
 
-def fetch_hevo():
-    endpoint='https://api.lever.co/v0/postings/hevodata?mode=json&limit=100'
-    req=Request(endpoint,headers={'Accept':'application/json','User-Agent':'FindAndTrack-personal-prototype/0.3'})
-    with urlopen(req,timeout=12) as response:
-        raw=response.read(3_000_001)
-        if len(raw)>3_000_000:
-            raise ValueError('Job feed is larger than the configured limit.')
-        posts=json.loads(raw)
-    if not isinstance(posts,list):
-        raise ValueError('Unexpected Lever response.')
-    return posts
+# Employer boards are explicit so coverage and failures can be shown to users.
+EMPLOYER_BOARDS = (('hevodata', 'Hevo Data'), ('zeta', 'Zeta'), ('cred', 'CRED'))
 
-def refresh_feed(data,posts,stamp):
-    report={'source':'Hevo Data / Lever public postings API','discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0}
+def fetch_board(board):
+    posts=[]
+    for offset in range(0, 1000, 100):
+        endpoint=f'https://api.lever.co/v0/postings/{board}?mode=json&limit=100&skip={offset}'
+        req=Request(endpoint,headers={'Accept':'application/json','User-Agent':'FindAndTrack/0.2'})
+        with urlopen(req,timeout=12) as response:
+            raw=response.read(3_000_001)
+        if len(raw)>3_000_000:
+            raise ValueError('Job feed exceeds response limit.')
+        page=json.loads(raw)
+        if not isinstance(page,list):
+            raise ValueError('Unexpected Lever response.')
+        posts.extend(page)
+        if len(page)<100:
+            return posts
+    raise ValueError('Board exceeds pagination limit; incomplete results were discarded.')
+
+def fetch_hevo():
+    return fetch_board('hevodata')
+
+def fetch_boards():
+    from concurrent.futures import ThreadPoolExecutor
+    def fetch_one(item):
+        board,company=item
+        try:
+            return {'board':board,'company':company,'posts':fetch_board(board)}
+        except Exception:
+            return {'board':board,'company':company,'error':'Employer feed unavailable. Retry later.'}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        return list(pool.map(fetch_one,EMPLOYER_BOARDS))
+
+def apply_boards(data,batches,stamp):
+    reports=[]
+    for batch in batches:
+        if batch.get('error'):
+            reports.append({'source':batch['company'],'error':batch['error']})
+        else:
+            reports.append(refresh_feed(data,batch['posts'],stamp,batch['board'],batch['company']))
+    return reports
+
+def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
+    report={'source':company+' / Lever public postings API','discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0}
     for post in posts:
         if not isinstance(post,dict) or not isinstance(post.get('id'),str):
             continue
@@ -282,32 +332,50 @@ def refresh_feed(data,posts,stamp):
         text=plain(post.get('descriptionPlain') or post.get('description',''))
         text+=' '+ ' '.join(plain(item.get('text','')+' '+item.get('content','')) for item in post.get('lists',[]) if isinstance(item,dict))
         text+=' '+plain(post.get('additionalPlain') or post.get('additional',''))
-        decision,reason=screen(title,text,location)
+        decision,reason=screen(title,text,location,data.get('profile'))
         url=post.get('hostedUrl','')
-        if not url.startswith('https://jobs.lever.co/hevodata/'):
+        if not url.startswith(f'https://jobs.lever.co/{board}/'):
             continue
         existing=next((j for j in data['jobs'] if j.get('url','').rstrip('/')==url.rstrip('/')),None)
         if existing:
             existing['sourceText']=text[:30000];existing['sourceCheckedAt']=stamp
+            facts=candidate(data.get('profile',{}))
+            known=set(facts['skills']) | set(facts['additionalKnowledge'])
+            terms=[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)]
+            existing['discoveryMatch']={'matchedSkills':[term for term in terms if term in known],'missingSkills':[term for term in terms if term not in known],'checkedAt':stamp}
+            existing['latestDiscoveryDecision']={'screening':decision,'reason':reason}
+
             # Keep existing eligibility decisions and application progress intact.
             report['updated']+=1;continue
         if decision=='exclude':
             report['excluded']+=1;continue
-        job={'id':'J-LEVER-HEVO-'+post['id'],'company':'Hevo Data','title':title,'url':url,'location':location,'model':post.get('workplaceType','Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
+        job={'id':'J-LEVER-'+board.upper()+'-'+post['id'],'company':company,'title':title,'url':url,'location':location,'model':post.get('workplaceType','Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
+        facts=candidate(data.get('profile',{}))
+        known=set(facts['skills']) | set(facts['additionalKnowledge'])
+        matches=[term for term in job['skills'] if term in known]
+        missing=[term for term in job['skills'] if term not in known]
+        job['discoveryMatch']={'matchedSkills':matches,'missingSkills':missing,'checkedAt':stamp}
+        job['fit']='Resume matches: '+(', '.join(matches) or 'no recognized skills')+'. Review gaps: '+(', '.join(missing) or 'none recognized')+'. '+reason
+        if not matches and decision=='shortlist':
+            job['screening']='review'
+            decision='review'
         data['jobs'].append(job);report['added']+=1
         if decision=='review':report['review']+=1
     return report
 
-def run(db_path,refresh=False,messages=None,fetcher=fetch_hevo):
+def run(db_path,refresh=False,messages=None,fetcher=None):
     from server import validate
-    stamp=utcnow();posts=None;source_error=None
+    stamp=utcnow();posts=None;source_error=None;batches=None
     if refresh:
-        try:posts=fetcher()
+        try:
+            if fetcher is None:batches=fetch_boards()
+            else:posts=fetcher()
         except Exception as exc:source_error=f'{type(exc).__name__}: {str(exc)[:160]}'
     with closing(sqlite3.connect(db_path)) as db,db:
         db.execute('BEGIN IMMEDIATE')
         revision,payload=db.execute('SELECT revision,payload FROM workspace WHERE id=1').fetchone();data=json.loads(payload)
         report={'at':stamp,'mode':'prepare + public jobs feed' if refresh else 'prepare','sources':[]}
+        if batches is not None:report['sources'].extend(apply_boards(data,batches,stamp))
         if posts is not None:report['sources'].append(refresh_feed(data,posts,stamp))
         if source_error:report['sources'].append({'source':'Hevo Data / Lever public postings API','error':source_error})
         if messages is not None:

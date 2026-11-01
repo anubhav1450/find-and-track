@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from workflow import candidate, prepare, match_inbox, screen, refresh_feed, run
+from workflow import apply_boards, candidate, prepare, match_inbox, screen, refresh_feed, run
 from server import init_db
 
 def workspace():
@@ -91,12 +91,35 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(screen('Software Engineer','3+ years experience','India')[0],'exclude')
         self.assertEqual(screen('Software Engineer','Fresh graduates welcome','United States')[0],'exclude')
 
+    def test_selected_profile_changes_geography_and_role_review(self):
+        profile={'candidate':{'geography':'Canada','roleFamilies':['backend']}}
+        self.assertEqual(screen('Backend Developer','Fresh graduates welcome','Toronto, Canada',profile)[0],'shortlist')
+        self.assertEqual(screen('Frontend Developer','Fresh graduates welcome','Toronto, Canada',profile)[0],'review')
+        self.assertEqual(screen('Backend Developer','Fresh graduates welcome','Toronto, Canada')[0],'exclude')
+        self.assertEqual(screen('Backend Developer','Fresh graduates welcome','Remote',profile)[0],'review')
+
     def test_feed_updates_preserve_existing_application_and_deduplicate(self):
         d=workspace();d['jobs'][0]['url']='https://jobs.lever.co/hevodata/existing'
         posts=[{'id':'existing','text':'Software Engineer','hostedUrl':'https://jobs.lever.co/hevodata/existing','categories':{'location':'Bangalore, India'},'descriptionPlain':'0-1 years in software development. Python REST APIs.'},{'id':'new','text':'Backend Developer','hostedUrl':'https://jobs.lever.co/hevodata/new','categories':{'location':'Bangalore, India'},'descriptionPlain':'Fresh graduates welcome. Python.'}]
         result=refresh_feed(d,posts,'2026-10-27T10:00:00Z');self.assertEqual(result['added'],1)
         self.assertEqual(d['jobs'][0]['status'],'applied')
         self.assertEqual(refresh_feed(d,posts,'2026-10-27T10:00:00Z')['added'],0)
+
+    def test_multiple_boards_and_partial_failure_preserve_progress(self):
+        d=workspace()
+        post={'id':'same-id','text':'Backend Developer','hostedUrl':'https://jobs.lever.co/zeta/same-id','categories':{'location':'India'},'descriptionPlain':'Fresh graduates welcome. Python Docker.'}
+        batches=[{'board':'zeta','company':'Zeta','posts':[post]}, {'board':'cred','company':'CRED','error':'Unavailable'}]
+        report=apply_boards(d,batches,'2026-11-01T12:00:00Z')
+        self.assertEqual(report[0]['added'],1)
+        self.assertEqual(report[1]['error'],'Unavailable')
+        job=d['jobs'][-1]
+        self.assertEqual(job['company'],'Zeta')
+        self.assertIn('Python',job['discoveryMatch']['matchedSkills'])
+        self.assertIn('Docker',job['discoveryMatch']['missingSkills'])
+        job['status']='applied'
+        apply_boards(d,batches,'2026-11-01T13:00:00Z')
+        self.assertEqual(len(d['jobs']),2)
+        self.assertEqual(job['status'],'applied')
 
     def test_failed_feed_is_visible_and_preserves_local_workspace(self):
         with tempfile.TemporaryDirectory() as directory:

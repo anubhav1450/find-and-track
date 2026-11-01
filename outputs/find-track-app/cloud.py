@@ -11,7 +11,7 @@ from urllib.parse import urlsplit,urlencode,parse_qs
 import base64,hashlib,hmac,json,mimetypes,os,re,secrets
 from uuid import UUID
 from server import validate
-from workflow import prepare,refresh_feed,fetch_hevo,utcnow
+from workflow import prepare,refresh_feed,fetch_hevo,utcnow,fetch_boards,apply_boards
 ROOT=Path(__file__).resolve().parent
 ACCESS='__Host-ft_access';REFRESH='__Host-ft_refresh';CSRF='__Host-ft_csrf';PKCE='__Host-ft_pkce'
 class CloudError(Exception):
@@ -200,9 +200,7 @@ def make_handler(config=None,client=None):
                         state=self.db.load(self.access);data=state['data'];stamp=utcnow()
                         report={'at':stamp,'mode':'cloud preparation','sources':[]}
                         if body['action']=='refresh':
-                            try:posts=fetch_hevo()
-                            except Exception:report['sources'].append({'source':'Hevo Data / Lever public postings API','error':'Public feed unavailable; saved jobs preserved.'})
-                            else:report['sources'].append(refresh_feed(data,posts,stamp))
+                            report['sources'].extend(apply_boards(data,fetch_boards(),stamp))
                         report['preparation']=prepare(data,stamp);data.setdefault('workflow',{})['lastRun']=report
                         self.db.save(self.access,state['revision'],data)
                         return self.reply(200,{'report':report})
