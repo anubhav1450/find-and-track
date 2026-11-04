@@ -91,6 +91,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(screen('Software Engineer','3+ years experience','India')[0],'exclude')
         self.assertEqual(screen('Software Engineer','Fresh graduates welcome','United States')[0],'exclude')
 
+    def test_indian_graduate_titles_and_explicit_experience(self):
+        self.assertEqual(screen('Technology Intern','Fresh graduates welcome to build REST APIs.','Delhi')[0],'shortlist')
+        self.assertEqual(screen('Fraud Analyst','Investigate fraudulent payments.','Delhi')[0],'exclude')
+        self.assertEqual(screen('Software Engineer','Fresh graduates welcome. 3 years of software development experience required.','India')[0],'exclude')
+
     def test_selected_profile_changes_geography_and_role_review(self):
         profile={'candidate':{'geography':'Canada','roleFamilies':['backend']}}
         self.assertEqual(screen('Backend Developer','Fresh graduates welcome','Toronto, Canada',profile)[0],'shortlist')

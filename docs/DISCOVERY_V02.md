@@ -1,5 +1,11 @@
 # Resume-driven discovery v0.2
 
+## Product decision: search by role
+
+A user imports a resume and taps Find jobs. Derive target titles from saved preferences and skills, search across employers, inspect responsibilities and eligibility, then rank by resume evidence. A company list is optional supplemental coverage. Keep an unverified lead in Needs review until the original employer confirms the opening. Preserve provider attribution and application progress across searches.
+
+First slice: search the Remotive software catalog locally using derived role terms, with a six-hour process cache. Remote coverage only. Supplemental Lever boards still provide direct postings. Next slice: broader India onsite/hybrid sources, JD-based handling of ambiguous titles, employer verification and screening corrections. Evaluate live yield and manually review accepted and rejected jobs before calling the milestone complete.
+
 ## Outcome
 Import a resume, confirm extracted skills and search preferences, press Find jobs, and receive current employer postings ranked against that profile. Each result links to its source and explains matches, gaps and uncertainty.
 

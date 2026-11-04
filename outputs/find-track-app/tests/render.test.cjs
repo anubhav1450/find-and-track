@@ -11,7 +11,8 @@ test('application boot and every screen render with the domain bundle loaded', a
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/domain.js'),'utf8'),context);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8'),context);
   await new Promise(resolve=>setImmediate(resolve));
-  assert.ok(app.innerHTML.includes('Your next opportunity.'));
+  assert.ok(app.innerHTML.includes('Your daily shortlist.'));
+  assert.equal(vm.runInContext("matchesFilter({publishedAt:'2020-01-01', sourceCheckedAt:new Date().toISOString()},'posted')",context),false);
   for (const page of ['shortlist','applications','people','followups','discover','profile','detail']) {
     vm.runInContext(`page=${JSON.stringify(page)};selected='j1';render();`,context);
     assert.ok(app.innerHTML.includes('find&track'),page);

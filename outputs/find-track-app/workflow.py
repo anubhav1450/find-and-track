@@ -257,12 +257,15 @@ def screen(title,text,location,profile=None):
     title_lower=title.lower();description=text.lower()
     if re.search(r'\b(senior|staff|principal|lead|manager|director|architect)\b|\bsde\s*(?:ii|iii|2|3)\b',title_lower):
         return 'exclude','Senior/leadership role'
-    if not re.search(r'software|developer|full.?stack|front.?end|back.?end|\bsde\b|test automation',title_lower):
+    ambiguous_dev = re.search(r'\b(technology intern|analyst|programmer)\b', title_lower) and re.search(r'build(?:ing)? (?:rest )?apis|software development|develop(?:ing)? (?:web|software) applications', description)
+    if not ambiguous_dev and not re.search(r'software|developer|full.?stack|front.?end|back.?end|\bsde\b|test automation',title_lower):
         return 'exclude','Outside software-development scope'
-    if not re.search(r'india|bangalore|bengaluru|noida|hyderabad|mumbai|pune|chennai|gurugram|gurgaon|kolkata|remote.?india',location,re.I):
+    if not re.search(r'india|bangalore|bengaluru|delhi|noida|hyderabad|mumbai|pune|chennai|gurugram|gurgaon|kolkata|remote.?india',location,re.I):
         return 'exclude','India eligibility not established'
     if re.search(r'\bunpaid\b|permanent night shift|(?:pay|payment of) (?:an? )?(?:application|training|interview) fee',description):
         return 'exclude','Disclosed hard exclusion'
+    if re.search(r'\b(?:[2-9]|[1-9]\d+) years? of (?:professional |relevant |software development |software engineering )?experience (?:is |are )?required',description):
+        return 'exclude','Mandatory experience exceeds fresher scope'
     if isinstance(role_families,list):
         specific=[role.strip().lower() for role in role_families if isinstance(role,str) and role.strip()]
         broad={'software development','software engineering','software engineer','developer','programmer'}
@@ -302,16 +305,103 @@ def fetch_board(board):
 def fetch_hevo():
     return fetch_board('hevodata')
 
+GREENHOUSE = {'stripe': ('Stripe', 'stripe.com'), 'rubrik': ('Rubrik', 'www.rubrik.com')}
+
+def greenhouse_posts(board):
+    endpoint=f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true'
+    with urlopen(Request(endpoint,headers={'Accept':'application/json'}),timeout=25) as response:
+        raw=response.read(32_000_001)
+    if len(raw)>32_000_000:
+        raise ValueError('Board exceeds size limit')
+    return [{'id':str(job['id']), 'text':job['title'], 'hostedUrl':job['absolute_url'],
+             'categories':{'location':job['location']['name']},'publishedAt':job.get('first_published'),
+             'description':unescape(job.get('content') or '')} for job in json.loads(raw)['jobs']]
+
 def fetch_boards():
     from concurrent.futures import ThreadPoolExecutor
     def fetch_one(item):
         board,company=item
         try:
-            return {'board':board,'company':company,'posts':fetch_board(board)}
+            return {'board':board,'company':company,'posts':greenhouse_posts(board) if board in GREENHOUSE else fetch_board(board)}
         except Exception:
             return {'board':board,'company':company,'error':'Employer feed unavailable. Retry later.'}
     with ThreadPoolExecutor(max_workers=3) as pool:
-        return list(pool.map(fetch_one,EMPLOYER_BOARDS))
+        return list(pool.map(fetch_one,(*EMPLOYER_BOARDS,*[(key,value[0]) for key,value in GREENHOUSE.items()])))
+
+def target_roles(profile):
+    roles=list(profile.get('candidate',{}).get('roleFamilies') or [])
+    skills=candidate(profile)['skills']
+    if skills.keys() & {'Node.js','FastAPI','Java','Python'}:
+        roles.extend(['backend','back-end'])
+    if skills.keys() & {'React','JavaScript','TypeScript'}:
+        roles.extend(['frontend','front-end','full stack','full-stack'])
+    roles.extend(['software engineer','software developer','graduate engineer','technology intern','SDE'])
+    return list(dict.fromkeys(role.lower() for role in roles if isinstance(role,str) and role.strip()))
+
+def remote_listings():
+    # Download the cross-employer catalog once per six hours per running process.
+    import time
+    with _remote_lock:
+        cached_at, rows = _remote_cache
+        if cached_at and time.monotonic()-cached_at < 21600:
+            return rows
+        req=Request('https://remotive.com/api/remote-jobs?category=software-dev',headers={'User-Agent':'FindAndTrack/0.2'})
+        with urlopen(req,timeout=12) as response:
+            raw=response.read(12000001)
+        if len(raw)>12000000:
+            raise ValueError('Catalog size limit exceeded')
+        rows=json.loads(raw)['jobs']
+        if not isinstance(rows,list):
+            raise ValueError('Invalid jobs catalog')
+        _remote_cache[:]=[time.monotonic(),rows]
+        return rows
+
+from threading import Lock
+_remote_lock=Lock()
+_remote_cache=[0,[]]
+
+def apply_role_search(data,rows,stamp):
+    roles=target_roles(data['profile'])
+    report={'source':'Remotive · remote role search','roles':roles,'discovered':len(rows),'added':0,'updated':0,'review':0,'excluded':0}
+    known=candidate(data['profile'])
+    skills=set(known['skills']) | set(known['additionalKnowledge'])
+    existing={j['url']:j for j in data['jobs'] if j.get('url')}
+    for row in rows:
+        title=row.get('title') or ''
+        url=row.get('url') or ''
+        if not url.startswith('https://remotive.com/remote-jobs/') or not any(role in title.lower() for role in roles):
+            report['excluded']+=1
+            continue
+        jd=plain(row.get('description',''))
+        location=row.get('candidate_required_location') or 'Unspecified'
+        geography=data['profile'].get('candidate',{}).get('geography') or 'India'
+        decision,reason=screen(title,jd,geography if location.lower()=='worldwide' else location,data['profile'])
+        if decision=='exclude':
+            report['excluded']+=1
+            continue
+        terms=[term for term,pattern in SKILLS.items() if re.search(pattern,jd,re.I)]
+        matches=[term for term in terms if term in skills]
+        gaps=[term for term in terms if term not in skills]
+        evidence={'matchedSkills':matches,'missingSkills':gaps,'checkedAt':stamp}
+        published=row.get('publication_date')
+        if url in existing:
+            if published: existing[url]['publishedAt']=published
+            existing[url].update(discoveryMatch=evidence,sourceCheckedAt=stamp)
+            report['updated']+=1
+            continue
+        job={'id':'J-REMOTIVE-'+str(row['id']),'company':row['company_name'],'title':title,'url':url,'source':url,'location':location,'model':'Remote','type':row.get('job_type') or 'Unconfirmed','status':'saved','screening':'review','experience':reason,'fit':'Source: Remotive. Employer opening unverified. Resume matches: '+(', '.join(matches) or 'none identified')+'.','sourceText':jd[:30000],'skills':terms,'discoveryMatch':evidence,'salary':row.get('salary') or 'Unconfirmed','salaryConfirmed':False,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jdVerified':False}
+        data['jobs'].append(job)
+        job.update(firstSeenAt=stamp,publishedAt=published,publicationSource='Remotive')
+        existing[url]=job
+        report['added']+=1
+        report['review']+=1
+    return report
+
+def get_remote_catalog():
+    try:
+        return remote_listings(),None
+    except (OSError,ValueError,KeyError) as exc:
+        return [],{'source':'Remotive','error':type(exc).__name__+' retrieving role catalog'}
 
 def apply_boards(data,batches,stamp):
     reports=[]
@@ -323,7 +413,7 @@ def apply_boards(data,batches,stamp):
     return reports
 
 def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
-    report={'source':company+' / Lever public postings API','discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0}
+    report={'source':company+(' / Greenhouse' if board in GREENHOUSE else ' / Lever public postings API'),'discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0}
     for post in posts:
         if not isinstance(post,dict) or not isinstance(post.get('id'),str):
             continue
@@ -334,10 +424,14 @@ def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
         text+=' '+plain(post.get('additionalPlain') or post.get('additional',''))
         decision,reason=screen(title,text,location,data.get('profile'))
         url=post.get('hostedUrl','')
-        if not url.startswith(f'https://jobs.lever.co/{board}/'):
+        if board in GREENHOUSE:
+            if urlsplit(url).scheme!='https' or urlsplit(url).hostname!=GREENHOUSE[board][1]:
+                continue
+        elif not url.startswith(f'https://jobs.lever.co/{board}/'):
             continue
         existing=next((j for j in data['jobs'] if j.get('url','').rstrip('/')==url.rstrip('/')),None)
         if existing:
+            if post.get('publishedAt'): existing.update(publishedAt=post['publishedAt'],publicationSource=company)
             existing['sourceText']=text[:30000];existing['sourceCheckedAt']=stamp
             facts=candidate(data.get('profile',{}))
             known=set(facts['skills']) | set(facts['additionalKnowledge'])
@@ -349,7 +443,7 @@ def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
             report['updated']+=1;continue
         if decision=='exclude':
             report['excluded']+=1;continue
-        job={'id':'J-LEVER-'+board.upper()+'-'+post['id'],'company':company,'title':title,'url':url,'location':location,'model':post.get('workplaceType','Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
+        job={'id':('J-GH-' if board in GREENHOUSE else 'J-LEVER-')+board.upper()+'-'+post['id'],'company':company,'title':title,'url':url,'location':location,'model':post.get('workplaceType','Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
         facts=candidate(data.get('profile',{}))
         known=set(facts['skills']) | set(facts['additionalKnowledge'])
         matches=[term for term in job['skills'] if term in known]
@@ -359,6 +453,7 @@ def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
         if not matches and decision=='shortlist':
             job['screening']='review'
             decision='review'
+        job.update(firstSeenAt=stamp,publishedAt=post.get('publishedAt'),publicationSource=company)
         data['jobs'].append(job);report['added']+=1
         if decision=='review':report['review']+=1
     return report
@@ -368,14 +463,18 @@ def run(db_path,refresh=False,messages=None,fetcher=None):
     stamp=utcnow();posts=None;source_error=None;batches=None
     if refresh:
         try:
-            if fetcher is None:batches=fetch_boards()
+            if fetcher is None:
+                catalog,catalog_error=get_remote_catalog()
+                batches=fetch_boards()
             else:posts=fetcher()
         except Exception as exc:source_error=f'{type(exc).__name__}: {str(exc)[:160]}'
     with closing(sqlite3.connect(db_path)) as db,db:
         db.execute('BEGIN IMMEDIATE')
         revision,payload=db.execute('SELECT revision,payload FROM workspace WHERE id=1').fetchone();data=json.loads(payload)
         report={'at':stamp,'mode':'prepare + public jobs feed' if refresh else 'prepare','sources':[]}
-        if batches is not None:report['sources'].extend(apply_boards(data,batches,stamp))
+        if batches is not None:
+            report['sources'].append(catalog_error or apply_role_search(data,catalog,stamp))
+            report['sources'].extend(apply_boards(data,batches,stamp))
         if posts is not None:report['sources'].append(refresh_feed(data,posts,stamp))
         if source_error:report['sources'].append({'source':'Hevo Data / Lever public postings API','error':source_error})
         if messages is not None:
