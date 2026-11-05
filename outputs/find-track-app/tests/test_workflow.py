@@ -91,6 +91,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(screen('Software Engineer','3+ years experience','India')[0],'exclude')
         self.assertEqual(screen('Software Engineer','Fresh graduates welcome','United States')[0],'exclude')
 
+    def test_paid_faq_and_explicit_mid_level(self):
+        title = 'Software Development Engineer Intern'
+        faq = 'Is it a Paid/Unpaid internship? It is a paid internship.'
+        self.assertEqual(screen(title, faq, 'Bangalore')[0], 'review')
+        self.assertEqual(screen(title, 'This internship is unpaid.', 'Bangalore')[0], 'exclude')
+        self.assertEqual(screen('Software Engineer (Mid Level)', '', 'India')[0], 'exclude')
+
     def test_indian_graduate_titles_and_explicit_experience(self):
         self.assertEqual(screen('Technology Intern','Fresh graduates welcome to build REST APIs.','Delhi')[0],'shortlist')
         self.assertEqual(screen('Fraud Analyst','Investigate fraudulent payments.','Delhi')[0],'exclude')

@@ -255,14 +255,16 @@ def screen(title,text,location,profile=None):
         location='India'
 
     title_lower=title.lower();description=text.lower()
-    if re.search(r'\b(senior|staff|principal|lead|manager|director|architect)\b|\bsde\s*(?:ii|iii|2|3)\b',title_lower):
+    if re.search(r'\b(senior|mid[- ]level|staff|principal|lead|manager|director|architect)\b|\bsde\s*(?:ii|iii|2|3)\b',title_lower):
         return 'exclude','Senior/leadership role'
     ambiguous_dev = re.search(r'\b(technology intern|analyst|programmer)\b', title_lower) and re.search(r'build(?:ing)? (?:rest )?apis|software development|develop(?:ing)? (?:web|software) applications', description)
     if not ambiguous_dev and not re.search(r'software|developer|full.?stack|front.?end|back.?end|\bsde\b|test automation',title_lower):
         return 'exclude','Outside software-development scope'
     if not re.search(r'india|bangalore|bengaluru|delhi|noida|hyderabad|mumbai|pune|chennai|gurugram|gurgaon|kolkata|remote.?india',location,re.I):
         return 'exclude','India eligibility not established'
-    if re.search(r'\bunpaid\b|permanent night shift|(?:pay|payment of) (?:an? )?(?:application|training|interview) fee',description):
+    # A compensation FAQ can mention both options before answering that it is paid.
+    compensation = re.sub(r'paid\s*/\s*unpaid\s+internship\s*\?\s*it is a\s+paid\b', 'paid internship', description)
+    if re.search(r'\bunpaid\b|permanent night shift|(?:pay|payment of) (?:an? )?(?:application|training|interview) fee',compensation):
         return 'exclude','Disclosed hard exclusion'
     if re.search(r'\b(?:[2-9]|[1-9]\d+) years? of (?:professional |relevant |software development |software engineering )?experience (?:is |are )?required',description):
         return 'exclude','Mandatory experience exceeds fresher scope'
@@ -305,7 +307,9 @@ def fetch_board(board):
 def fetch_hevo():
     return fetch_board('hevodata')
 
-GREENHOUSE = {'stripe': ('Stripe', 'stripe.com'), 'rubrik': ('Rubrik', 'www.rubrik.com')}
+GREENHOUSE = {'stripe': ('Stripe', 'stripe.com'), 'rubrik': ('Rubrik', 'www.rubrik.com'),
+              'hackerrank': ('HackerRank', 'job-boards.greenhouse.io'),
+              'superapp': ('SuperApp', 'job-boards.greenhouse.io')}
 
 def greenhouse_posts(board):
     endpoint=f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true'
