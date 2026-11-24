@@ -82,6 +82,15 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(self.request()[1]['revision'],1)
             preview.assert_called_once()
 
+    def test_company_research_protected_preview_does_not_save(self):
+        from unittest.mock import patch
+        with patch('company_research.research_company_name',return_value={'report':{'company':'Example'},'contacts':[]}) as research:
+            self.assertEqual(self.request('POST','/api/companies/research',{'company':'Example'})[0],403)
+            status,result=self.request('POST','/api/companies/research',{'company':'Example'},{'X-Workspace-Token':'test-token'})
+            self.assertEqual(status,200)
+            research.assert_called_once_with('Example','','')
+            self.assertEqual(self.request()[1]['revision'],1)
+
     def test_persistence_revision_and_history(self):
         self.data['jobs'][0]['status']='applied'
         self.assertEqual(self.put(self.data),(200,{'revision':2}))

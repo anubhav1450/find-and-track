@@ -189,11 +189,14 @@ def make_handler(config=None,client=None):
                         try:self.db.logout(self.access)
                         finally:self.clear_cookies()
                         return self.reply(200,{'ok':True})
-                    if self.command=='POST' and path in ('/api/jobs/research','/api/jobs/search'):
+                    if self.command=='POST' and path in ('/api/jobs/research','/api/jobs/search','/api/companies/research'):
                         body=self.body(4096);data=self.db.load(self.access)['data']
                         if path=='/api/jobs/search':
                             from web_discovery import discover_roles
                             return self.reply(200,discover_roles(data['profile']))
+                        if path=='/api/companies/research':
+                            from company_research import research_company_name
+                            return self.reply(200,research_company_name(body.get('company'),body.get('website',''),body.get('role','')))
                         job=next((j for j in data['jobs'] if j['id']==body.get('jobId')),None)
                         if job is None:raise CloudError(400,'Save the job before researching it.')
                         company=next((c for c in data['companies'] if c.get('name')==job['company']),{})

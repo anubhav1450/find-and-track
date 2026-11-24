@@ -167,7 +167,7 @@ def make_handler(db_path, token):
                     from search_provider import save_key
                     return self.reply(200,save_key(body.get('key')))
                 except (ValueError,TypeError,AttributeError) as exc:return self.reply(400,{'error':str(exc)})
-            if self.path in ('/api/jobs/research','/api/jobs/search'):
+            if self.path in ('/api/jobs/research','/api/jobs/search','/api/companies/research'):
                 try:
                     size=int(self.headers.get('Content-Length','0'))
                     if size<1 or size>4096:return self.reply(400,{'error':'Invalid research request.'})
@@ -177,6 +177,9 @@ def make_handler(db_path, token):
                     if self.path=='/api/jobs/search':
                         from web_discovery import discover_roles
                         return self.reply(200,discover_roles(data['profile']))
+                    if self.path=='/api/companies/research':
+                        from company_research import research_company_name
+                        return self.reply(200,research_company_name(body.get('company'),body.get('website',''),body.get('role','')))
                     job=next((j for j in data['jobs'] if j['id']==body.get('jobId')),None)
                     if job is None:raise ValueError('Save the job before researching it.')
                     company=next((c for c in data['companies'] if c.get('name')==job['company']),{})

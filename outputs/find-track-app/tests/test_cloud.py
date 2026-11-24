@@ -56,6 +56,14 @@ class CloudTests(unittest.TestCase):
         status,body,headers=self.request('/api/session',headers={'Cookie':f'{ACCESS}=valid-token'})
         self.assertEqual(status,200);self.assertIn('HttpOnly',headers['Set-Cookie']);self.assertIn('Secure',headers['Set-Cookie'])
         self.assertNotIn('valid-token',json.dumps(body))
+    def test_company_research_requires_login_and_does_not_save(self):
+        with patch('company_research.research_company_name',return_value={'report':{'company':'Example'},'contacts':[]}) as research:
+            self.assertEqual(self.request('/api/companies/research','POST',{'company':'Example'},headers={'Origin':ORIGIN})[0],401)
+            status,body,_=self.request('/api/companies/research','POST',{'company':'Example'},authenticated=True,headers={'Origin':ORIGIN,'X-Workspace-Token':'nonce'})
+            self.assertEqual(status,200)
+            research.assert_called_once_with('Example','','')
+            self.assertEqual(self.store.saved,0)
+
     def test_job_preview_requires_login_and_keeps_workspace_unchanged(self):
         with patch('web_discovery.preview_link',return_value={'job':{'title':'Preview'}}) as preview:
             self.assertEqual(self.request('/api/jobs/preview','POST',{'url':'https://example.com'},headers={'Origin':ORIGIN})[0],401)

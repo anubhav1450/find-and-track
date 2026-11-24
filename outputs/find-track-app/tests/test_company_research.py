@@ -102,3 +102,23 @@ class ResearchTests(unittest.TestCase):
     def test_linkedin_wrong_job_id_is_not_imported(self):
         with self.assertRaisesRegex(ValueError,'No matching posting'):
             preview_link('https://linkedin.com/jobs/view/4494314638',{'name':'Test'},lambda q:{'results':[{'url':'https://linkedin.com/jobs/view/another-role-4494314639','title':'Developer at Wrong'}]})
+
+    def test_company_only_research_has_no_fake_job_and_career_sources(self):
+        from company_research import research_company_name
+        def searcher(query,**kwargs):
+            return {'results':[{'title':'Asha Verma - Recruiter at Example','url':'https://linkedin.com/in/asha','content':'Recruiter at Example.'}, {'title':'Example careers','url':'https://example.com/careers','content':'Example software engineering careers.'}]}
+        result=research_company_name('Example','https://example.com','Backend developer',searcher)
+        self.assertEqual(result['report']['searchesRequested'],13)
+        self.assertEqual(result['report']['targetRole'],'Backend developer')
+        self.assertTrue(result['report']['careerEvidence'])
+        self.assertTrue(result['contacts'])
+        self.assertEqual(result['contacts'][0]['jobIds'],[])
+        self.assertEqual(result['contacts'][0]['activityStatus'],'unconfirmed')
+
+    def test_invalid_company_inputs_do_not_search(self):
+        from company_research import research_company_name
+        from unittest.mock import Mock
+        searcher=Mock()
+        for company,website,role in [('', '', ''),('Example','javascript:bad',''),('Example','','x'*151)]:
+            with self.assertRaises(ValueError):research_company_name(company,website,role,searcher)
+        searcher.assert_not_called()

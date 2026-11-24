@@ -100,6 +100,14 @@ Use Tavily's free plan and keep pay-as-you-go disabled if you want free-only usa
 
 ![Step 6: Add job dialog showing the posting URL field and Import posting button](docs/assets/guide-05-posting.png)
 
+### Research with only a company name
+
+Open **Companies → Research a company** (also available in Discover). Enter the company name; optionally add its official HTTPS website to distinguish similar names and a target role for career search.
+
+Select **Find company & people**. Review identity evidence, complaint-related sources, career links, hiring activity and recruiter/employee leads. Expand the source sections and confirm the results belong to the intended employer before selecting **Save company & people**. Retry with the official website if the identity looks wrong.
+
+Saved research stays under Companies; contacts appear under People. No job posting or application is fabricated. Add a real vacancy separately when ready. This flow uses up to **13 basic searches**, with six-hour cache reuse. Missing results and provider errors remain visible. Founders, size, salary, legitimacy and current activity are not guaranteed or automatically verified.
+
 ### 7. Apply and track
 
 Open a job to review its description, resume gaps and company evidence. Company/people research needs the search key; it may return fewer than ten relevant contacts. Current employment, activity and company legitimacy need your review.

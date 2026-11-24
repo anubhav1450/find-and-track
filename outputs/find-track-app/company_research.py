@@ -106,7 +106,7 @@ def research_company(job, website='', searcher=search):
             if re.search(r'former|previously|ex-'+re.escape(company.lower()),lowered):score-=3
             item={'id':'P-WEB-'+hashlib.sha256(profile.encode()).hexdigest()[:16],
                   'name':name,'company':company,'role':heading[:200], 'url':profile,'source':url,
-                  'status':'discovered','jobIds':[job['id']], 'contactType':contact_type,
+                  'status':'discovered','jobIds':[job['id']] if job.get('id') else [], 'contactType':contact_type,
                   'relevance':'Indexed company and role match; verify current employer and vacancy relevance.',
                   'uncertainty':'Current employment and recent activity require confirmation. Search snippets may be stale.',
                   'checkedAt':checked,'activityStatus':'unconfirmed','affiliationStatus':'unconfirmed',
@@ -126,3 +126,28 @@ def research_company(job, website='', searcher=search):
             'shortfall':max(0,10-len(contacts)),'errors':errors,
             'searchesRequested':len(queries)}
     return {'report':report,'contacts':contacts}
+
+
+def research_company_name(company, website='', role='', searcher=search):
+    """Research an employer without inventing a job or application record."""
+    company=clean_company(company)
+    if not isinstance(role,str) or len(role)>150:raise ValueError('Use a role under 150 characters.')
+    if not isinstance(website,str) or (website and not safe_url(website)):
+        raise ValueError('Use an HTTPS company website or leave it blank.')
+    role=re.sub(r'["\r\n]', ' ',role).strip()
+    result=research_company({'company':company,'title':role or 'Software Engineer'},website,searcher)
+    report=result['report']
+    report['targetRole']=role
+    report['identityStatus']='user-supplied website; verify identity' if website else 'unconfirmed; review company identity before saving'
+    report['careerEvidence']=[]
+    entity=website or company
+    try:
+        response=searcher(f'{entity} careers jobs {role or "software engineer internship"}')
+        for row in response.get('results',[]):
+            if not isinstance(row,dict):continue
+            url=safe_url(row.get('url'));title=plain(row.get('title',''));content=plain(row.get('content',''))
+            if not url or company.casefold() not in (title+' '+content).casefold():continue
+            report['careerEvidence'].append({'url':url,'title':title[:250],'summary':content[:600],'kind':'careers','checkedAt':report['checkedAt']})
+    except (ValueError,OSError) as exc:report['errors'].append({'section':'careers','error':str(exc)})
+    report['searchesRequested']+=1
+    return result
