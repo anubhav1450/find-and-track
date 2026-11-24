@@ -114,6 +114,9 @@ def make_handler(db_path, token):
             path = urlsplit(self.path).path
             if path == '/api/session':
                 return self.reply(200, {'token': token, 'workflowVersion': 1})
+            if path == '/api/search/settings':
+                from search_provider import settings
+                return self.reply(200,{**settings(),'canSaveKey':True})
             if path == '/api/state':
                 with closing(sqlite3.connect(db_path)) as db, db:
                     revision, payload = db.execute('SELECT revision,payload FROM workspace WHERE id=1').fetchone()
@@ -156,6 +159,42 @@ def make_handler(db_path, token):
                 return self.reply(403, {'error': 'Invalid local session. Reload this page.'})
             if self.headers.get('Origin') not in (None, f'http://127.0.0.1:{self.server.server_port}', f'http://localhost:{self.server.server_port}'):
                 return self.reply(403, {'error': 'Invalid origin.'})
+            if self.path == '/api/search/settings':
+                try:
+                    size=int(self.headers.get('Content-Length','0'))
+                    if size<1 or size>1024:return self.reply(400,{'error':'Invalid settings request.'})
+                    body=json.loads(self.rfile.read(size))
+                    from search_provider import save_key
+                    return self.reply(200,save_key(body.get('key')))
+                except (ValueError,TypeError,AttributeError) as exc:return self.reply(400,{'error':str(exc)})
+            if self.path in ('/api/jobs/research','/api/jobs/search'):
+                try:
+                    size=int(self.headers.get('Content-Length','0'))
+                    if size<1 or size>4096:return self.reply(400,{'error':'Invalid research request.'})
+                    body=json.loads(self.rfile.read(size))
+                    with closing(sqlite3.connect(db_path)) as db:
+                        data=json.loads(db.execute('SELECT payload FROM workspace WHERE id=1').fetchone()[0])
+                    if self.path=='/api/jobs/search':
+                        from web_discovery import discover_roles
+                        return self.reply(200,discover_roles(data['profile']))
+                    job=next((j for j in data['jobs'] if j['id']==body.get('jobId')),None)
+                    if job is None:raise ValueError('Save the job before researching it.')
+                    company=next((c for c in data['companies'] if c.get('name')==job['company']),{})
+                    from company_research import research_company
+                    return self.reply(200,research_company(job,company.get('website','')))
+                except (ValueError,TypeError,AttributeError) as exc:return self.reply(400,{'error':str(exc)})
+            if self.path == '/api/jobs/preview':
+                try:
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if size < 1 or size > 4096:
+                        return self.reply(400, {'error': 'Paste one job URL.'})
+                    body = json.loads(self.rfile.read(size))
+                    with closing(sqlite3.connect(db_path)) as db:
+                        payload = db.execute('SELECT payload FROM workspace WHERE id=1').fetchone()[0]
+                    from web_discovery import preview_link
+                    return self.reply(200, preview_link(body.get('url'), json.loads(payload)['profile']))
+                except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                    return self.reply(400, {'error': str(exc)})
             if self.path == '/api/resume/extract':
                 try:
                     size=int(self.headers.get('Content-Length','0'))

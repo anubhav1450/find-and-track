@@ -32,7 +32,7 @@
   }
   function acceptanceTask(data, person, makeId) {
     if (person.status !== 'accepted' || data.actions.some(a => a.contactId === person.id && a.kind === 'acceptance')) return;
-    data.actions.push({id: makeId(), title: `Prepare follow-up for ${person.name}`, details: 'Review the relevant role, tailor your message and attach the chosen resume manually.', jobId: person.jobIds[0] || '', contactId: person.id, kind: 'acceptance', status: 'pending'});
+    data.actions.push({id: makeId(), title: `Prepare follow-up for ${person.name}`, details: 'Review the relevant role, tailor your message and attach the chosen resume manually.', jobId: (person.jobIds||[])[0] || '', contactId: person.id, kind: 'acceptance', status: 'pending'});
   }
   function createMessage(person, job, profile, connected = false) {
     if (!job) return '';

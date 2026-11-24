@@ -1,10 +1,10 @@
-# Private cloud deployment
+# Optional owner-only cloud deployment
 
 The local app and its SQLite data remain intact. The cloud entrypoint uses the existing UI with a separate storage and authentication adapter. Hosting does not add background Gmail monitoring.
 
 ## Services
 
-- Vercel project: `find-and-track`, connected to the private repository. Keep deployment protection enabled.
+- Vercel project: `find-and-track`, connected to your repository. Keep deployment protection enabled.
 - Supabase: dedicated Free `find-and-track` project in the personal Find and Track organization, in Mumbai. Its database schema is applied; the application does not need the database password.
 - Supabase email sign-in links with PKCE authenticate the owner. New email sessions are checked server-side with the provider before any workspace access. Cookies are Secure, HttpOnly, SameSite=Lax and host-scoped; writes also require matching Origin and CSRF token.
 
@@ -28,6 +28,8 @@ The local app and its SQLite data remain intact. The cloud entrypoint uses the e
 
 Free service limits and inactive-project pausing apply. Do not disable protection or publish personal workspace data to work around setup problems.
 
-## Verified deployment
+## Deployment status
 
-Production: https://find-and-track.vercel.app. Email-link sign-in and the authenticated database round trip were verified. The local workspace was imported through the authenticated restore flow. A live Hevo refresh added one employer-posted internship, leaving 20 jobs and 9 contacts. Reload preserved those records. Unauthenticated app access and anonymous direct database access returned 401. Local and cloud workspaces are separate copies; no automatic two-way sync is configured.
+The public source release is local-first. A previous owner deployment was verified separately; that does not verify this release on your infrastructure. Run the acceptance checks above after deployment. Do not expose the owner workspace as a public demo.
+
+Set `TAVILY_API_KEY` server-side for optional search. Serverless temporary caches do not provide a durable monthly quota; configure limits with the provider. Never ship keys in frontend assets. Gmail sync and multi-user signup are not included.

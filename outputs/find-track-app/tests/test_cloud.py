@@ -56,6 +56,15 @@ class CloudTests(unittest.TestCase):
         status,body,headers=self.request('/api/session',headers={'Cookie':f'{ACCESS}=valid-token'})
         self.assertEqual(status,200);self.assertIn('HttpOnly',headers['Set-Cookie']);self.assertIn('Secure',headers['Set-Cookie'])
         self.assertNotIn('valid-token',json.dumps(body))
+    def test_job_preview_requires_login_and_keeps_workspace_unchanged(self):
+        with patch('web_discovery.preview_link',return_value={'job':{'title':'Preview'}}) as preview:
+            self.assertEqual(self.request('/api/jobs/preview','POST',{'url':'https://example.com'},headers={'Origin':ORIGIN})[0],401)
+            status,body,_=self.request('/api/jobs/preview','POST',{'url':'https://example.com'},authenticated=True,headers={'Origin':ORIGIN,'X-Workspace-Token':'nonce'})
+            self.assertEqual(status,200)
+            self.assertEqual(body['job']['title'],'Preview')
+            self.assertEqual(self.store.saved,0)
+            preview.assert_called_once()
+
     def test_other_verified_account_is_rejected(self):
         self.store.user_value={**USER,'email':'other@example.com'}
         self.assertEqual(self.request(authenticated=True)[0],403);self.assertEqual(self.store.saved,0)

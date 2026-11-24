@@ -1,4 +1,4 @@
-"""Candidate preparation, one documented public jobs feed, and evidence-based inbox sync."""
+"""Resume preparation, public job feeds, and evidence-based inbox sync."""
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
@@ -25,7 +25,7 @@ SKILLS={
  'React Native':r'react\s+native', 'RAG':r'\brag\b|retrieval.augmented',
  'Kubernetes':r'\bkubernetes\b|\bk8s\b', 'Django / Flask':r'\bdjango\b|\bflask\b',
  'Pandas / NumPy':r'\bpandas\b|\bnumpy\b', 'AWS':r'\baws\b', 'Azure':r'\bazure\b',
- 'Go':r'\bgolang\b|\bgo\b', 'PostgreSQL':r'\bpostgres(?:ql)?\b',
+ 'Go':r'\bgolang\b|(?-i:\bGo\b)(?: programming| language| developer| engineer)|\bgo(?=\s*[,/])', 'PostgreSQL':r'\bpostgres(?:ql)?\b',
 }
 
 def utcnow():
@@ -74,7 +74,7 @@ def message_for(person,job,profile,connected=False):
     first=person['name'].split()[0]
     candidate_name=profile.get('name','').split()[0]
     facts=profile.get('candidate',{})
-    intro=f"I’m a {facts.get('graduationYear',2026)} {facts.get('degreeLabel','B.Tech CSE')} graduate"
+    intro = f"I’m {profile.get('name', '')}"
     status='I applied for' if job.get('status') in ('applied','assessment','interview','offer') else 'I’m interested in'
     comparison=skill_comparison(job,profile)
     terms=[m['term'] for m in comparison['matches'] if m['term'] not in ('Git','DSA','OOP')][:3]
@@ -88,7 +88,7 @@ def tailor_resume(profile,comparison):
     if not facts.get('graduationYear') or not facts.get('degreeLabel'):
         return original,[]
     terms=[m['term'] for m in comparison['matches']][:6]
-    summary=f"{facts['graduationYear']} {facts['degreeLabel']} graduate with software internship experience."
+    summary=f"{facts['graduationYear']} {facts['degreeLabel']} graduate."
     if terms:summary+=' Relevant skills: '+', '.join(terms)+'.'
     if facts.get('availableImmediately'):summary+=' Available immediately.'
     if facts.get('relocationIndia'):summary+=' Open to relocation within India.'
@@ -111,8 +111,11 @@ def prepare(data,stamp=None):
     profile['candidate']=facts
     before={j['id']:j.get('preparation',{}) for j in data['jobs']}
     for job in data['jobs']:
+        if job.get('sourceKind')=='search-index':
+            decision,reason=screen(job['title'],job.get('sourceText',''),facts.get('geography') or 'India',profile)
+            job['latestDiscoveryDecision']={'screening':'review' if decision=='shortlist' else decision,'reason':reason}
         comparison=skill_comparison(job,profile)
-        fingerprint=hashlib.sha256(json.dumps([facts['resumeHash'],job.get('skills',[]),job.get('requirements',[]),job.get('jd',''),job.get('sourceText',''),job.get('tailoring',''),profile.get('confirmedSkills',[])],sort_keys=True).encode()).hexdigest()
+        fingerprint=hashlib.sha256(json.dumps([facts['resumeHash'],job.get('skills',[]),job.get('requirements',[]),job.get('jd',''),job.get('sourceText',''),job.get('tailoring',''),profile.get('confirmedSkills',[]), {key:facts.get(key) for key in ('graduationYear','degreeLabel','availableImmediately','relocationIndia')}],sort_keys=True).encode()).hexdigest()
         if before[job['id']].get('fingerprint')==fingerprint:
             continue
         terms=[row['term'] for row in comparison['matches']]
@@ -145,7 +148,7 @@ def prepare(data,stamp=None):
         if not job:
             continue
         if not person.get('connectionNote'):
-            person['connectionNote']=f"Hi {person['name'].split()[0]}, I’m interested in {job['company']}’s {job['title']} role. I’m a 2026 CSE graduate with software internship and backend/full-stack project experience. I’d be glad to connect."[:300]
+            person['connectionNote']=f"Hi {person['name'].split()[0]}, I’m interested in {job['company']}’s {job['title']} role. I’d be glad to connect and learn more about the opportunity."[:300]
         if person.get('status') in ('accepted','message prepared') and not person.get('draft'):
             person['draft']=message_for(person,job,profile,connected=True)
             person['draftPreparedAt']=stamp
@@ -255,9 +258,13 @@ def screen(title,text,location,profile=None):
         location='India'
 
     title_lower=title.lower();description=text.lower()
-    if re.search(r'\b(senior|mid[- ]level|staff|principal|lead|manager|director|architect)\b|\bsde\s*(?:ii|iii|2|3)\b',title_lower):
-        return 'exclude','Senior/leadership role'
-    ambiguous_dev = re.search(r'\b(technology intern|analyst|programmer)\b', title_lower) and re.search(r'build(?:ing)? (?:rest )?apis|software development|develop(?:ing)? (?:web|software) applications', description)
+    if re.search(r'\b(senior|mid[- ]level|staff|principal|lead|manager|director|architect)\b|\b(?:sde|software (?:development )?engineer)\s*(?:ii|iii|iv|[2-9])\b',title_lower):
+        return 'exclude','Role exceeds entry-level seniority'
+    if re.search(r'\b(?:product|data|business|cost|financial|fraud) analyst\b',title_lower):
+        return 'exclude','Outside software-development scope'
+    ambiguous_dev = re.search(r'\b(technology intern|analyst|programmer)\b',title_lower) and re.search(r'build(?:ing)? (?:rest )?apis|software development|develop(?:ing)? (?:web|software) applications',description)
+    engineering_intern = 'engineering intern' in title_lower and re.search(r'python|typescript|javascript|backend|full.stack|software|generative ai|gen ai',description)
+    ambiguous_dev = ambiguous_dev or engineering_intern
     if not ambiguous_dev and not re.search(r'software|developer|full.?stack|front.?end|back.?end|\bsde\b|test automation',title_lower):
         return 'exclude','Outside software-development scope'
     if not re.search(r'india|bangalore|bengaluru|delhi|noida|hyderabad|mumbai|pune|chennai|gurugram|gurgaon|kolkata|remote.?india',location,re.I):
@@ -268,6 +275,17 @@ def screen(title,text,location,profile=None):
         return 'exclude','Disclosed hard exclusion'
     if re.search(r'\b(?:[2-9]|[1-9]\d+) years? of (?:professional |relevant |software development |software engineering )?experience (?:is |are )?required',description):
         return 'exclude','Mandatory experience exceeds fresher scope'
+    # Numeric experience claims need local context; bare 0→1 product language never qualifies.
+    experience_ranges=re.finditer(r'\b(\d+)\s*(?:[-–—]|to)\s*(\d+)\s*years?\b(.{0,85})',description)
+    ranges=[(int(m[1]),int(m[2])) for m in experience_ranges if re.search(r'experience|engineering|development|frontend|backend|building|programming|working|in software',m[3])]
+    if any(lo>=2 for lo,_ in ranges) or re.search(r'\b[2-9]\d*\s*\+\s*years?\b|(?:minimum|at least)\s+[2-9]\d*\s+years?',description):
+        return 'exclude','Mandatory experience exceeds fresher scope'
+    if re.search(r'\b(?:2|two|3|three)[- ]year\b.{0,35}(?:bond|service lock|commitment)|(?:bond|service lock).{0,35}\b(?:2|two|3|three)[- ]years?\b',description):
+        return 'exclude','Multi-year service commitment disclosed'
+    graduation=preferences.get('graduationYear')
+    cohorts=re.findall(r'(?:graduating|graduation|batch|class of)\s*(?:in|of)?\s*(20\d{2})',description)
+    if graduation and cohorts and str(graduation) not in cohorts:
+        return 'review','Graduation cohort differs from saved profile; confirm eligibility'
     if isinstance(role_families,list):
         specific=[role.strip().lower() for role in role_families if isinstance(role,str) and role.strip()]
         broad={'software development','software engineering','software engineer','developer','programmer'}
@@ -276,16 +294,14 @@ def screen(title,text,location,profile=None):
             patterns=[aliases.get(role,re.escape(role)) for role in specific]
             if not any(re.search(pattern,title,re.I) for pattern in patterns):
                 return 'review','Role title does not establish a selected role family'
-    # Numeric experience claims need local context; bare 0→1 product language never qualifies.
-    ranges=re.findall(r'\b(\d+)\s*(?:[-–]|to)\s*(\d+)\s*years?\s*(?:of\s*)?(?:experience|in software|in development)',description)
-    if any(int(lo)>=2 for lo,_ in ranges) or re.search(r'\b[2-9]\d*\s*\+\s*years?\b|(?:minimum|at least)\s+[2-9]\d*\s+years?',description):
-        return 'exclude','Mandatory experience exceeds fresher scope'
+    if re.search(r'\b1\s*[-–]\s*2\s*years?\b',description):
+        return 'review','One to two years requested; review eligibility'
     if re.search(r'fresh(?:er| graduate)|new.grad|recent graduate|little or no (?:prior )?experience|\b0\s*[-–]\s*[12]\s*years?\b',description):
         return 'shortlist','Explicit early-career / zero-experience eligibility; other terms need verification'
     return 'review','Experience / graduate eligibility needs review'
 
 # Employer boards are explicit so coverage and failures can be shown to users.
-EMPLOYER_BOARDS = (('hevodata', 'Hevo Data'), ('zeta', 'Zeta'), ('cred', 'CRED'))
+EMPLOYER_BOARDS = (('hevodata', 'Hevo Data'), ('zeta', 'Zeta'), ('cred', 'CRED'), ('drivetrain','Drivetrain'), ('merklescience','Merkle Science'))
 
 def fetch_board(board):
     posts=[]
@@ -323,14 +339,19 @@ def greenhouse_posts(board):
 
 def fetch_boards():
     from concurrent.futures import ThreadPoolExecutor
+    from startup_sources import ASHBY_BOARDS, ashby_posts
+    sources=[(board,company,'lever') for board,company in EMPLOYER_BOARDS]
+    sources.extend((board,value[0],'greenhouse') for board,value in GREENHOUSE.items())
+    sources.extend((board,company,'ashby') for board,company in ASHBY_BOARDS.items())
     def fetch_one(item):
-        board,company=item
+        board,company,provider=item
         try:
-            return {'board':board,'company':company,'posts':greenhouse_posts(board) if board in GREENHOUSE else fetch_board(board)}
+            fetcher={'lever':fetch_board,'greenhouse':greenhouse_posts,'ashby':ashby_posts}[provider]
+            return {'board':board,'company':company,'provider':provider,'posts':fetcher(board)}
         except Exception:
-            return {'board':board,'company':company,'error':'Employer feed unavailable. Retry later.'}
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        return list(pool.map(fetch_one,(*EMPLOYER_BOARDS,*[(key,value[0]) for key,value in GREENHOUSE.items()])))
+            return {'board':board,'company':company,'provider':provider,'error':'Employer feed unavailable. Retry later.'}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return list(pool.map(fetch_one,sources))
 
 def target_roles(profile):
     roles=list(profile.get('candidate',{}).get('roleFamilies') or [])
@@ -364,39 +385,57 @@ from threading import Lock
 _remote_lock=Lock()
 _remote_cache=[0,[]]
 
+def count_exclusion(report, reason):
+    report['excluded'] += 1
+    reasons = report.setdefault('reasons', {})
+    reasons[reason] = reasons.get(reason, 0) + 1
+
+
+def canonical_posting(url):
+    from research import canonical
+    return canonical(url)
+
+
 def apply_role_search(data,rows,stamp):
     roles=target_roles(data['profile'])
-    report={'source':'Remotive · remote role search','roles':roles,'discovered':len(rows),'added':0,'updated':0,'review':0,'excluded':0}
+    report={'source':'Remotive · remote role search','roles':roles,'discovered':len(rows),'added':0,'updated':0,'review':0,'excluded':0,'invalid':0,'reasons':{}}
     known=candidate(data['profile'])
     skills=set(known['skills']) | set(known['additionalKnowledge'])
-    existing={j['url']:j for j in data['jobs'] if j.get('url')}
+    existing={canonical_posting(j['url']):j for j in data['jobs'] if j.get('url')}
     for row in rows:
+        if not isinstance(row,dict) or not all(isinstance(row.get(k),str) for k in ('title','url','company_name','description')) or not isinstance(row.get('id'),(str,int)):
+            report['invalid']+=1
+            continue
+        if any(not isinstance(row.get(k) or '',str) for k in ('candidate_required_location','salary','job_type','publication_date')):
+            report['invalid']+=1
+            continue
         title=row.get('title') or ''
         url=row.get('url') or ''
         if not url.startswith('https://remotive.com/remote-jobs/') or not any(role in title.lower() for role in roles):
-            report['excluded']+=1
+            count_exclusion(report, 'Outside selected software roles or invalid source link')
             continue
         jd=plain(row.get('description',''))
         location=row.get('candidate_required_location') or 'Unspecified'
         geography=data['profile'].get('candidate',{}).get('geography') or 'India'
         decision,reason=screen(title,jd,geography if location.lower()=='worldwide' else location,data['profile'])
         if decision=='exclude':
-            report['excluded']+=1
+            count_exclusion(report, reason)
             continue
         terms=[term for term,pattern in SKILLS.items() if re.search(pattern,jd,re.I)]
         matches=[term for term in terms if term in skills]
         gaps=[term for term in terms if term not in skills]
         evidence={'matchedSkills':matches,'missingSkills':gaps,'checkedAt':stamp}
         published=row.get('publication_date')
-        if url in existing:
-            if published: existing[url]['publishedAt']=published
-            existing[url].update(discoveryMatch=evidence,sourceCheckedAt=stamp)
+        key=canonical_posting(url)
+        if key in existing:
+            if published: existing[key]['publishedAt']=published
+            existing[key].update(discoveryMatch=evidence,sourceCheckedAt=stamp,sourceText=jd[:30000],latestDiscoveryDecision={'screening':decision,'reason':reason})
             report['updated']+=1
             continue
         job={'id':'J-REMOTIVE-'+str(row['id']),'company':row['company_name'],'title':title,'url':url,'source':url,'location':location,'model':'Remote','type':row.get('job_type') or 'Unconfirmed','status':'saved','screening':'review','experience':reason,'fit':'Source: Remotive. Employer opening unverified. Resume matches: '+(', '.join(matches) or 'none identified')+'.','sourceText':jd[:30000],'skills':terms,'discoveryMatch':evidence,'salary':row.get('salary') or 'Unconfirmed','salaryConfirmed':False,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jdVerified':False}
         data['jobs'].append(job)
         job.update(firstSeenAt=stamp,publishedAt=published,publicationSource='Remotive')
-        existing[url]=job
+        existing[key]=job
         report['added']+=1
         report['review']+=1
     return report
@@ -404,7 +443,7 @@ def apply_role_search(data,rows,stamp):
 def get_remote_catalog():
     try:
         return remote_listings(),None
-    except (OSError,ValueError,KeyError) as exc:
+    except (OSError,ValueError,KeyError,TypeError) as exc:
         return [],{'source':'Remotive','error':type(exc).__name__+' retrieving role catalog'}
 
 def apply_boards(data,batches,stamp):
@@ -413,30 +452,59 @@ def apply_boards(data,batches,stamp):
         if batch.get('error'):
             reports.append({'source':batch['company'],'error':batch['error']})
         else:
-            reports.append(refresh_feed(data,batch['posts'],stamp,batch['board'],batch['company']))
+            report=refresh_feed(data,batch['posts'],stamp,batch['board'],batch['company'],provider=batch.get('provider'))
+            reports.append(report)
+            if not report.get('invalid'):
+                listed={canonical_posting(p['hostedUrl']) for p in batch['posts'] if isinstance(p,dict) and isinstance(p.get('hostedUrl'),str)}
+                for job in data['jobs']:
+                    if job.get('publicationSource')==batch['company'] and job.get('url') and canonical_posting(job['url']) not in listed:
+                        job['availability']='not returned by source'
+                        job['availabilityCheckedAt']=stamp
+
     return reports
 
-def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
-    report={'source':company+(' / Greenhouse' if board in GREENHOUSE else ' / Lever public postings API'),'discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0}
+def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data',provider=None,include_excluded=False):
+    is_greenhouse = provider == 'greenhouse' or board in GREENHOUSE
+    is_ashby = provider == 'ashby'
+    report={'source':company+(' / Ashby' if is_ashby else ' / Greenhouse' if is_greenhouse else ' / Lever public postings API'),'discovered':len(posts),'added':0,'updated':0,'excluded':0,'review':0,'invalid':0,'reasons':{}}
     for post in posts:
-        if not isinstance(post,dict) or not isinstance(post.get('id'),str):
+        if not isinstance(post,dict) or not isinstance(post.get('id'),str) or not isinstance(post.get('text'),str) or not isinstance(post.get('categories',{}),dict):
+            report['invalid']+=1
+            continue
+        if any(not isinstance(post.get(k,''),str) for k in ('descriptionPlain','description','additionalPlain','additional','hostedUrl')) or not isinstance(post.get('lists',[]),list):
+            report['invalid']+=1
             continue
         title=post.get('text','');categories=post.get('categories',{})
-        location=categories.get('location','')
+        location=categories.get('location') or 'Unspecified'
+        if not isinstance(location,str):
+            report['invalid']+=1
+            continue
+        if not title.strip() or not post['id'] or any(not isinstance(categories.get(k,''),str) for k in ('commitment',)) or not isinstance(post.get('workplaceType') or '',str):
+            report['invalid']+=1
+            continue
         text=plain(post.get('descriptionPlain') or post.get('description',''))
-        text+=' '+ ' '.join(plain(item.get('text','')+' '+item.get('content','')) for item in post.get('lists',[]) if isinstance(item,dict))
+        text+=' '+ ' '.join(plain(item.get('text','')+' '+item.get('content','')) for item in post.get('lists',[]) if isinstance(item,dict) and isinstance(item.get('text',''),str) and isinstance(item.get('content',''),str))
         text+=' '+plain(post.get('additionalPlain') or post.get('additional',''))
         decision,reason=screen(title,text,location,data.get('profile'))
         url=post.get('hostedUrl','')
-        if board in GREENHOUSE:
-            if urlsplit(url).scheme!='https' or urlsplit(url).hostname!=GREENHOUSE[board][1]:
-                continue
-        elif not url.startswith(f'https://jobs.lever.co/{board}/'):
+        parts=urlsplit(url)
+        if is_ashby:
+            valid_url=parts.scheme=='https' and parts.hostname=='jobs.ashbyhq.com' and parts.path.startswith('/'+board+'/')
+        elif is_greenhouse:
+            permitted_hosts={'job-boards.greenhouse.io','boards.greenhouse.io'}
+            if board in GREENHOUSE:
+                permitted_hosts.add(GREENHOUSE[board][1])
+            valid_url=parts.scheme=='https' and parts.hostname in permitted_hosts
+        else:
+            valid_url=parts.scheme=='https' and parts.hostname=='jobs.lever.co' and parts.path.startswith(f'/{board}/')
+        if not valid_url or parts.username or parts.password:
+            report['invalid']+=1
             continue
-        existing=next((j for j in data['jobs'] if j.get('url','').rstrip('/')==url.rstrip('/')),None)
+        existing=next((j for j in data['jobs'] if j.get('url') and canonical_posting(j['url'])==canonical_posting(url)),None)
         if existing:
             if post.get('publishedAt'): existing.update(publishedAt=post['publishedAt'],publicationSource=company)
             existing['sourceText']=text[:30000];existing['sourceCheckedAt']=stamp
+            existing['availability']='listed';existing['availabilityCheckedAt']=stamp
             facts=candidate(data.get('profile',{}))
             known=set(facts['skills']) | set(facts['additionalKnowledge'])
             terms=[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)]
@@ -445,9 +513,10 @@ def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
 
             # Keep existing eligibility decisions and application progress intact.
             report['updated']+=1;continue
-        if decision=='exclude':
-            report['excluded']+=1;continue
-        job={'id':('J-GH-' if board in GREENHOUSE else 'J-LEVER-')+board.upper()+'-'+post['id'],'company':company,'title':title,'url':url,'location':location,'model':post.get('workplaceType','Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
+        if decision=='exclude' and not include_excluded:
+            count_exclusion(report,reason)
+            continue
+        job={'id':('J-ASHBY-' if is_ashby else 'J-GH-' if is_greenhouse else 'J-LEVER-')+board.upper()+'-'+post['id'],'company':company,'title':title,'url':url,'location':location,'model':(post.get('workplaceType') or 'Unconfirmed').capitalize(),'type':categories.get('commitment','Unconfirmed'),'status':'saved','screening':decision,'experience':reason,'salary':'Not disclosed; take-home unconfirmed','salaryConfirmed':False,'fit':'Profile comparison prepared from the employer feed; inspect evidence and learning gaps.','unknowns':'Confirm all hard eligibility, compensation, fees, bonds and shifts. Feed availability is not an offer guarantee.','skills':[term for term,pattern in SKILLS.items() if re.search(pattern,text,re.I)],'sourceText':text[:30000],'source':url,'checkedAt':stamp,'createdAt':stamp,'requirements':[],'jd':'','jdVerified':False}
         facts=candidate(data.get('profile',{}))
         known=set(facts['skills']) | set(facts['additionalKnowledge'])
         matches=[term for term in job['skills'] if term in known]
@@ -457,7 +526,7 @@ def refresh_feed(data,posts,stamp,board='hevodata',company='Hevo Data'):
         if not matches and decision=='shortlist':
             job['screening']='review'
             decision='review'
-        job.update(firstSeenAt=stamp,publishedAt=post.get('publishedAt'),publicationSource=company)
+        job.update(firstSeenAt=stamp,publishedAt=post.get('publishedAt'),publicationSource=company,availability='listed',availabilityCheckedAt=stamp,dateMeaning=post.get('dateMeaning','Source publication date'))
         data['jobs'].append(job);report['added']+=1
         if decision=='review':report['review']+=1
     return report

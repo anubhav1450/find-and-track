@@ -1,0 +1,84 @@
+import copy
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from company_research import research_company,profile_url,affiliation_supported
+from web_discovery import discover_roles,preview_link
+from workflow import screen,apply_boards
+
+class ResearchTests(unittest.TestCase):
+    def test_people_deduplicate_and_keep_activity_unconfirmed(self):
+        def searcher(query,recent=False):
+            return {'results':[{'title':'Asha Verma - Example - LinkedIn','url':'https://in.linkedin.com/in/asha/?trk=test','content':'Technical recruiter at Example.'}, {'title':'Asha Verma - Example - LinkedIn','url':'https://www.linkedin.com/in/asha','content':'Technical recruiter at Example.'},{'title':'Wrong Person - Other','url':'https://linkedin.com/in/other','content':'Recruiter at another company'}]}
+        result=research_company({'id':'j','company':'Example','title':'Engineer'},searcher=searcher)
+        self.assertEqual(len(result['contacts']),1)
+        self.assertEqual(result['contacts'][0]['activityStatus'],'unconfirmed')
+        self.assertEqual(result['report']['shortfall'],9)
+        self.assertEqual(result['report']['activityVerifiedCount'],0)
+        self.assertEqual(profile_url('https://linkedin.com.evil.test/in/a'),'')
+
+    def test_company_name_collision_is_rejected(self):
+        self.assertFalse(affiliation_supported('Hailey - HR at ATC Drivetrain','HR coordinator at ATC Drivetrain','Drivetrain'))
+        self.assertFalse(affiliation_supported('Alex - Drivetrain Engineer at John Deere','Mechanical engineer','Drivetrain'))
+        self.assertTrue(affiliation_supported('Usama - Talent Partner @ Drivetrain - LinkedIn','Talent recruiter','Drivetrain'))
+        self.assertTrue(affiliation_supported('Swapna - HRBP | Drivetrain | LinkedIn','HR','Drivetrain'))
+
+    def test_search_errors_are_reported_without_false_scam_verdict(self):
+        def broken(*args,**kwargs):raise ValueError('Quota reached')
+        result=research_company({'id':'j','company':'Example'},searcher=broken)
+        self.assertEqual(len(result['report']['errors']),12)
+        self.assertEqual(result['contacts'],[])
+        self.assertNotIn('safe',result['report']['assessment'].lower())
+
+    def test_posting_index_date_is_not_published_date(self):
+        url='https://www.linkedin.com/jobs/view/123'
+        row={'url':url,'title':'Backend Developer at Example | LinkedIn','content':'Python internship','published_date':'2026-11-24'}
+        result=preview_link(url,{'name':'Test','resume':'Python'},lambda *a,**k:{'results':[row]})['job']
+        self.assertEqual(result['company'],'Example')
+        self.assertIsNone(result['publishedAt'])
+        self.assertEqual(result['availability'],'unconfirmed')
+        self.assertFalse(result['jdVerified'])
+
+    def test_role_search_discards_unavailable_postings(self):
+        row={'url':'https://jobs.lever.co/example/123','title':'Software Engineer at Example','content':'Python'}
+        def missing(*args):raise ValueError('Closed')
+        result=discover_roles({'resume':'Python'},lambda *a,**k:{'results':[row]},missing)
+        self.assertEqual(result['jobs'],[])
+        self.assertEqual(result['leads'],[])
+        self.assertEqual(len(result['errors']),1)
+
+    def test_ashby_unlisted_and_secondary_locations(self):
+        from startup_sources import ashby_posts
+        class Response:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def read(self,*args):return json.dumps({'jobs':[
+                {'title':'Hidden Engineer','isListed':False,'jobUrl':'https://jobs.ashbyhq.com/example/hidden'},
+                {'title':'Software Engineer','isListed':True,'jobUrl':'https://jobs.ashbyhq.com/example/123','location':'US','secondaryLocations':[{'location':'India'}],'descriptionPlain':'Python','publishedAt':'2026-11-24'}]}).encode()
+        with patch('startup_sources.urlopen',return_value=Response()):rows=ashby_posts('example')
+        self.assertEqual(len(rows),1)
+        self.assertIn('India',rows[0]['categories']['location'])
+        self.assertEqual(rows[0]['dateMeaning'],'Last published by employer; may be a repost')
+
+    def test_live_seniority_variants_and_unrelated_analysts(self):
+        for title,text in [('Frontend Engineer','3–6 years in frontend engineering with shipped products'),('Software Engineer','4–6 years of building and operating production backend systems'),('Software Development Engineer 3','Backend work'),('Product Analyst II','Python and SQL analysis')]:
+            self.assertEqual(screen(title,text,'India')[0],'exclude')
+        self.assertEqual(screen('Software Analyst','Build REST APIs and develop web applications','India')[0],'review')
+
+    def test_bond_and_cohort_constraints(self):
+        self.assertEqual(screen('Software Engineer Intern','Full-time role subject to a 2-year service lock-in period','India')[0],'exclude')
+        profile={'candidate':{'graduationYear':2026}}
+        self.assertEqual(screen('Software Engineer Intern','Freshers graduating 2027 only','India',profile)[0],'review')
+        self.assertEqual(screen('Engineering Intern','Build Python APIs and backend systems','India')[0],'review')
+
+    def test_saved_search_key_is_private_and_never_returned(self):
+        import search_provider
+        with tempfile.TemporaryDirectory() as folder,patch.object(search_provider,'ROOT',Path(folder)),patch.dict('os.environ',{'TAVILY_API_KEY':''}):
+            result=search_provider.save_key('tvly-unit-test-key')
+            self.assertTrue(result['configured'])
+            self.assertNotIn('tvly-unit-test-key',json.dumps(result))
+            self.assertEqual((Path(folder)/'data/search-key.json').stat().st_mode & 0o777,0o600)

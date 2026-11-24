@@ -72,6 +72,16 @@ class WorkspaceTests(unittest.TestCase):
     def put(self,data,revision=1,headers=None):
         return self.request('PUT',body={'revision':revision,'data':data},headers=headers or {'X-Workspace-Token':'test-token','Content-Type':'application/json'})
 
+    def test_job_preview_requires_session_and_never_saves(self):
+        from unittest.mock import patch
+        with patch('web_discovery.preview_link', return_value={'job': {'title':'Preview'}}) as preview:
+            self.assertEqual(self.request('POST','/api/jobs/preview',{'url':'https://example.com'})[0],403)
+            status, result = self.request('POST','/api/jobs/preview',{'url':'https://example.com'}, {'X-Workspace-Token':'test-token'})
+            self.assertEqual(status,200)
+            self.assertEqual(result['job']['title'],'Preview')
+            self.assertEqual(self.request()[1]['revision'],1)
+            preview.assert_called_once()
+
     def test_persistence_revision_and_history(self):
         self.data['jobs'][0]['status']='applied'
         self.assertEqual(self.put(self.data),(200,{'revision':2}))

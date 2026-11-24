@@ -12,6 +12,10 @@ test('application boot and every screen render with the domain bundle loaded', a
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8'),context);
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(app.innerHTML.includes('Your daily shortlist.'));
+  assert.ok(app.innerHTML.includes('Software Engineer'));
+  assert.equal(vm.runInContext('screening',context),'current');
+  assert.match(vm.runInContext("data.workflow={lastRun:{at:new Date().toISOString(),sources:[{source:'Example',added:0,updated:2,excluded:5}]}};refreshSummary()",context),/2 already saved/);
+
   assert.equal(vm.runInContext("matchesFilter({publishedAt:'2020-01-01', sourceCheckedAt:new Date().toISOString()},'posted')",context),false);
   for (const page of ['shortlist','applications','people','followups','discover','profile','detail']) {
     vm.runInContext(`page=${JSON.stringify(page)};selected='j1';render();`,context);

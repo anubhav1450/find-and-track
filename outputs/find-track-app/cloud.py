@@ -179,6 +179,9 @@ def make_handler(config=None,client=None):
                     value=self.cookies.get(CSRF);nonce=value.value if value else secrets.token_urlsafe(32)
                     if not value:self.cookie(CSRF,nonce,604800)
                     return self.reply(200,{'token':nonce,'workflowVersion':1,'storage':'cloud'})
+                if self.command=='GET' and path=='/api/search/settings':
+                    from search_provider import settings
+                    return self.reply(200,{**settings(),'canSaveKey':False})
                 if self.command=='GET' and path=='/api/state':return self.reply(200,self.db.load(self.access))
                 if self.command in ('POST','PUT'):
                     self.origin();self.csrf()
@@ -186,6 +189,22 @@ def make_handler(config=None,client=None):
                         try:self.db.logout(self.access)
                         finally:self.clear_cookies()
                         return self.reply(200,{'ok':True})
+                    if self.command=='POST' and path in ('/api/jobs/research','/api/jobs/search'):
+                        body=self.body(4096);data=self.db.load(self.access)['data']
+                        if path=='/api/jobs/search':
+                            from web_discovery import discover_roles
+                            return self.reply(200,discover_roles(data['profile']))
+                        job=next((j for j in data['jobs'] if j['id']==body.get('jobId')),None)
+                        if job is None:raise CloudError(400,'Save the job before researching it.')
+                        company=next((c for c in data['companies'] if c.get('name')==job['company']),{})
+                        from company_research import research_company
+                        return self.reply(200,research_company(job,company.get('website','')))
+                    if self.command=='POST' and path=='/api/jobs/preview':
+                        from web_discovery import preview_link
+                        body = self.body(4096)
+                        state = self.db.load(self.access)
+                        try:return self.reply(200, preview_link(body.get('url'), state['data']['profile']))
+                        except ValueError as exc:raise CloudError(400,str(exc))
                     if self.command=='POST' and path=='/api/resume/extract':
                         from resume_import import extract_resume
                         try:return self.reply(200,extract_resume(self.body(4_100_000)))

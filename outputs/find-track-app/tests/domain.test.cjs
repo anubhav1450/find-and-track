@@ -57,3 +57,11 @@ test('one-tap transitions finish old work and prepare one truthful follow-up', (
   data.contacts[0].status='message sent'; advance();
   assert.equal(data.actions.find(a=>a.kind==='acceptance').status,'done');
 });
+
+test('acceptance works for a contact without job associations', () => {
+  const data={actions:[]};
+  const person={id:'p',name:'Recruiter',status:'accepted'};
+  const domain=require('../static/domain.js');
+  domain.acceptanceTask(data,person,()=> 'task');
+  assert.equal(data.actions[0].jobId,'');
+});
