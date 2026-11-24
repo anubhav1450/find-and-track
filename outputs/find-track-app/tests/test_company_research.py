@@ -82,3 +82,23 @@ class ResearchTests(unittest.TestCase):
             self.assertTrue(result['configured'])
             self.assertNotIn('tvly-unit-test-key',json.dumps(result))
             self.assertEqual((Path(folder)/'data/search-key.json').stat().st_mode & 0o777,0o600)
+
+    def test_linkedin_numeric_link_matches_slug_with_same_id(self):
+        from workflow import canonical_posting
+        numeric='https://www.linkedin.com/jobs/view/4494314638/'
+        slug='https://in.linkedin.com/jobs/view/junior-developer-at-example-4494314638?trk=feed'
+        self.assertEqual(canonical_posting(numeric),canonical_posting(slug))
+        self.assertNotEqual(canonical_posting(numeric),canonical_posting('https://linkedin.com/jobs/view/4494314639/'))
+        calls=[]
+        def searcher(query):
+            calls.append(query)
+            return {'results':[{'url':slug,'title':'Junior Developer at Example','content':'Software development role.'}]}
+        job=preview_link(numeric,{'name':'Test','resume':'Python'},searcher)['job']
+        self.assertEqual(job['url'],numeric)
+        self.assertEqual(job['company'],'Example')
+        self.assertEqual(job['availability'],'unconfirmed')
+        self.assertIn('4494314638',calls[0])
+
+    def test_linkedin_wrong_job_id_is_not_imported(self):
+        with self.assertRaisesRegex(ValueError,'No matching posting'):
+            preview_link('https://linkedin.com/jobs/view/4494314638',{'name':'Test'},lambda q:{'results':[{'url':'https://linkedin.com/jobs/view/another-role-4494314639','title':'Developer at Wrong'}]})

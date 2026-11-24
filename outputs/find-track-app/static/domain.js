@@ -9,6 +9,10 @@
   function canonicalPosting(url) {
     const parsed = new URL(url);
     if (parsed.hostname.endsWith('.linkedin.com')) parsed.hostname = 'linkedin.com';
+    if (parsed.hostname === 'linkedin.com') {
+      const job = parsed.pathname.match(/^\/jobs\/view\/(?:[^/]*-)?(\d+)\/?$/);
+      if (job) return 'https://linkedin.com/jobs/view/' + job[1];
+    }
     parsed.hash = '';
     parsed.pathname = parsed.pathname.replace(/\/$/, '');
     for (const key of [...parsed.searchParams.keys()]) {

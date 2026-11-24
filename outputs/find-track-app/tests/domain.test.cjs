@@ -65,3 +65,9 @@ test('acceptance works for a contact without job associations', () => {
   domain.acceptanceTask(data,person,()=> 'task');
   assert.equal(data.actions[0].jobId,'');
 });
+
+test('LinkedIn numeric and slug posting URLs share identity, not different IDs', () => {
+  const domain = require('../static/domain.js');
+  assert.equal(domain.canonicalPosting('https://www.linkedin.com/jobs/view/4494314638/'), domain.canonicalPosting('https://in.linkedin.com/jobs/view/junior-developer-at-example-4494314638?trk=feed'));
+  assert.notEqual(domain.canonicalPosting('https://linkedin.com/jobs/view/4494314638'), domain.canonicalPosting('https://linkedin.com/jobs/view/4494314639'));
+});

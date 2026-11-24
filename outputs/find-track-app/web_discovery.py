@@ -40,9 +40,13 @@ def preview_link(url,profile,searcher=search):
     if not url:raise ValueError('Paste the original HTTPS posting URL.')
     try:posting_reference(url)
     except ValueError:
-        results=searcher('"'+url+'" job role company responsibilities').get('results',[])
-        matching=[row for row in results if isinstance(row,dict) and safe_url(row.get('url')) and canonical_posting(row['url'])==canonical_posting(url)]
-        if not matching:raise ValueError('This link is not indexed yet. Enter the role, company and JD manually to start company research and tracking.')
+        canonical=canonical_posting(url)
+        query='"'+url+'" job role company responsibilities'
+        linkedin=re.fullmatch(r'https://linkedin.com/jobs/view/(\d+)',canonical)
+        if linkedin:query='site:linkedin.com/jobs/view/ "'+linkedin.group(1)+'"'
+        results=searcher(query).get('results',[])
+        matching=[row for row in results if isinstance(row,dict) and safe_url(row.get('url')) and canonical_posting(row['url'])==canonical]
+        if not matching:raise ValueError('No matching posting was found in web search. It may be unindexed, restricted or unavailable. Use Enter details manually to keep this link and paste the job description; no LinkedIn login is required by this app.')
         job=indexed_lead(matching[0],url)
         data={'profile':copy.deepcopy(profile),'jobs':[job],'contacts':[],'events':[],'actions':[]}
         prepare(data)

@@ -2,6 +2,7 @@
 import argparse
 from contextlib import closing
 import json
+import re
 from pathlib import Path
 import sqlite3
 from urllib.parse import urlsplit, parse_qsl, urlencode, urlunsplit
@@ -12,6 +13,10 @@ def canonical(url):
     host = parts.netloc.lower()
     if host.endswith('.linkedin.com'):
         host = 'linkedin.com'
+    if host == 'linkedin.com':
+        match = re.fullmatch(r'/jobs/view/(?:[^/]*-)?(\d+)/?', parts.path)
+        if match:
+            return 'https://linkedin.com/jobs/view/' + match.group(1)
     query = urlencode(sorted((k,v) for k,v in parse_qsl(parts.query) if not k.lower().startswith('utm_') and k not in ('trk','trackingId','refId','gh_src')))
     return urlunsplit((parts.scheme,host,parts.path.rstrip('/'),query,''))
 
